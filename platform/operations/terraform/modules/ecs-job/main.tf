@@ -1,0 +1,373 @@
+# main.tf
+# Manages primary resource definitions resources.
+
+# Module sourced from internal registry — pin version to prevent unexpected changes
+module "arap" {
+  source                 = "./services"
+  artifactory_secret_arn = var.artifactory_secret_arn
+  aws_region             = var.aws_region
+  chronos_url            = var.chronos_url
+  cluster_id             = var.cluster_id
+  cluster_name           = var.cluster_name
+  datadog_log_group      = var.dd_log_group_name
+  dd_api_key             = var.dd_api_key
+  dd_tag_cardinality     = var.dd_tag_cardinality
+  mock_version          = var.mock_version
+  environment            = var.environment
+  job_image              = var.arap_image
+  job_name               = var.arap_name
+  log_lambda_arn         = var.log_lambda_arn
+  log_script_filter      = var.log_script_filter
+  max_capacity           = var.arap_max
+  min_capacity           = var.arap_min
+  queue_name             = var.arap_queue_name
+  max_threshold          = var.arap_max_threshold
+  min_threshold          = var.arap_min_threshold
+  iam_role               = aws_iam_role.tagcore_instance_region_role.arn
+  sec_group              = aws_security_group.tagcore.id
+  subnet_ids             = var.priv_subnets
+  crowdstrike-cid        = var.crowdstrike-cid
+}
+module "coreplatform" {
+  source                 = "./services"
+  artifactory_secret_arn = var.artifactory_secret_arn
+  aws_region             = var.aws_region
+  chronos_url            = var.chronos_url
+  cluster_id             = var.cluster_id
+  cluster_name           = var.cluster_name
+  datadog_log_group      = var.dd_log_group_name
+  dd_api_key             = var.dd_api_key
+  dd_tag_cardinality     = var.dd_tag_cardinality
+  mock_version          = var.mock_version
+  environment            = var.environment
+  job_image              = var.coreplatform_image
+  job_name               = var.coreplatform_name
+  log_lambda_arn         = var.log_lambda_arn
+  log_script_filter      = var.log_script_filter
+  max_capacity           = var.coreplatform_max
+  min_capacity           = var.coreplatform_min
+  queue_name             = var.coreplatform_queue_name
+  max_threshold          = var.coreplatform_max_threshold
+  min_threshold          = var.coreplatform_min_threshold
+  iam_role               = aws_iam_role.tagcore_instance_region_role.arn
+  sec_group              = aws_security_group.tagcore.id
+  subnet_ids             = var.priv_subnets
+  crowdstrike-cid        = var.crowdstrike-cid
+}
+# Shared module — changes here affect all consumers. Semver applies.
+module "file-arrival" {
+  source                 = "./services"
+  artifactory_secret_arn = var.artifactory_secret_arn
+  aws_region             = var.aws_region
+  chronos_url            = var.chronos_url
+  cluster_id             = var.cluster_id
+  cluster_name           = var.cluster_name
+  datadog_log_group      = var.dd_log_group_name
+  dd_api_key             = var.dd_api_key
+  dd_tag_cardinality     = var.dd_tag_cardinality
+  mock_version          = var.mock_version
+  environment            = var.environment
+  job_image              = var.file-arrival_image
+  job_name               = var.file-arrival_name
+  log_lambda_arn         = var.log_lambda_arn
+  log_script_filter      = var.log_script_filter
+  max_capacity           = var.file-arrival_max
+  min_capacity           = var.file-arrival_min
+  queue_name             = var.file-arrival_queue_name
+  max_threshold          = var.filearr_max_threshold
+  min_threshold          = var.filearr_min_threshold
+  iam_role               = aws_iam_role.tagcore_instance_region_role.arn
+  sec_group              = aws_security_group.tagcore.id
+  subnet_ids             = var.priv_subnets
+  crowdstrike-cid        = var.crowdstrike-cid
+}
+module "partner_a-coreplatform" {
+  source                 = "./services"
+  artifactory_secret_arn = var.artifactory_secret_arn
+  aws_region             = var.aws_region
+  chronos_url            = var.chronos_url
+  cluster_id             = var.cluster_id
+  cluster_name           = var.cluster_name
+  datadog_log_group      = var.dd_log_group_name
+  dd_api_key             = var.dd_api_key
+  dd_tag_cardinality     = var.dd_tag_cardinality
+  mock_version          = var.mock_version
+  environment            = var.environment
+  job_image              = var.partner_a_coreplatform_image
+  job_name               = var.partner_a_coreplatform_name
+  log_lambda_arn         = var.log_lambda_arn
+  log_script_filter      = var.log_script_filter
+  max_capacity           = var.partner_a_coreplatform_max
+  min_capacity           = var.partner_a_coreplatform_min
+  queue_name             = var.partner_a_coreplatform_queue
+  max_threshold          = var.partner_a_coreplatform_max_threshold
+  min_threshold          = var.partner_a_coreplatform_min_threshold
+  iam_role               = aws_iam_role.tagcore_instance_region_role.arn
+  sec_group              = aws_security_group.tagcore.id
+  subnet_ids             = var.priv_subnets
+  crowdstrike-cid        = var.crowdstrike-cid
+}
+module "partner_a-fi" {
+  source                 = "./services"
+  artifactory_secret_arn = var.artifactory_secret_arn
+  aws_region             = var.aws_region
+  chronos_url            = var.chronos_url
+  cluster_id             = var.cluster_id
+  cluster_name           = var.cluster_name
+  datadog_log_group      = var.dd_log_group_name
+  dd_api_key             = var.dd_api_key
+  dd_tag_cardinality     = var.dd_tag_cardinality
+  mock_version          = var.mock_version
+  environment            = var.environment
+  job_image              = var.partner_a_fi_image
+  job_name               = var.partner_a_fi_name
+  log_lambda_arn         = var.log_lambda_arn
+  log_script_filter      = var.log_script_filter
+  max_capacity           = var.partner_a_fi_max
+  min_capacity           = var.partner_a_fi_min
+  queue_name             = var.partner_a_fi_queue
+  max_threshold          = var.partner_a_fi_max_threshold
+  min_threshold          = var.partner_a_fi_min_threshold
+  iam_role               = aws_iam_role.tagcore_instance_region_role.arn
+  sec_group              = aws_security_group.tagcore.id
+  subnet_ids             = var.priv_subnets
+  crowdstrike-cid        = var.crowdstrike-cid
+}
+
+module "partner-fi" {
+  source                 = "./services"
+  artifactory_secret_arn = var.artifactory_secret_arn
+  aws_region             = var.aws_region
+  chronos_url            = var.chronos_url
+  cluster_id             = var.cluster_id
+  cluster_name           = var.cluster_name
+  datadog_log_group      = var.dd_log_group_name
+  dd_api_key             = var.dd_api_key
+  dd_tag_cardinality     = var.dd_tag_cardinality
+  mock_version          = var.mock_version
+  environment            = var.environment
+  job_image              = var.partner_fi_image
+  job_name               = var.partner_fi_name
+  max_capacity           = var.partner_fi_max
+  min_capacity           = var.partner_fi_min
+  queue_name             = var.partner_fi_queue
+  max_threshold          = var.partner_fi_max_threshold
+  min_threshold          = var.partner_fi_min_threshold
+  log_lambda_arn         = var.log_lambda_arn
+  log_script_filter      = var.log_script_filter
+  iam_role               = aws_iam_role.tagcore_instance_region_role.arn
+  sec_group              = aws_security_group.tagcore.id
+  subnet_ids             = var.priv_subnets
+  crowdstrike-cid        = var.crowdstrike-cid
+}
+
+module "card-migration" {
+  source                 = "./services"
+  artifactory_secret_arn = var.artifactory_secret_arn
+  aws_region             = var.aws_region
+  chronos_url            = var.chronos_url
+  cluster_id             = var.cluster_id
+  cluster_name           = var.cluster_name
+  datadog_log_group      = var.dd_log_group_name
+  dd_api_key             = var.dd_api_key
+  dd_tag_cardinality     = var.dd_tag_cardinality
+  mock_version          = var.mock_version
+  environment            = var.environment
+  job_image              = var.card_migration_image
+  job_name               = var.card_migration_name
+  max_capacity           = var.card_migration_max
+  min_capacity           = var.card_migration_min
+  queue_name             = var.card_migration_queue
+  max_threshold          = var.card_migration_max_threshold
+  min_threshold          = var.card_migration_min_threshold
+  log_lambda_arn         = var.log_lambda_arn
+  log_script_filter      = var.log_script_filter
+  iam_role               = aws_iam_role.tagcore_instance_region_role.arn
+  sec_group              = aws_security_group.tagcore.id
+  subnet_ids             = var.priv_subnets
+  crowdstrike-cid        = var.crowdstrike-cid
+}
+
+
+module "mail" {
+  source                 = "./services"
+  artifactory_secret_arn = var.artifactory_secret_arn
+  aws_region             = var.aws_region
+  chronos_url            = var.chronos_url
+  cluster_id             = var.cluster_id
+  cluster_name           = var.cluster_name
+  datadog_log_group      = var.dd_log_group_name
+  dd_api_key             = var.dd_api_key
+  dd_tag_cardinality     = var.dd_tag_cardinality
+  mock_version          = var.mock_version
+  environment            = var.environment
+  job_image              = var.mail_image
+  job_name               = var.mail_name
+  log_lambda_arn         = var.log_lambda_arn
+  log_script_filter      = var.log_script_filter
+  max_capacity           = var.mail_max
+  min_capacity           = var.mail_min
+  queue_name             = var.mail_queue_name
+  max_threshold          = var.mail_max_threshold
+  min_threshold          = var.mail_min_threshold
+  iam_role               = aws_iam_role.tagcore_instance_region_role.arn
+  sec_group              = aws_security_group.tagcore.id
+  subnet_ids             = var.priv_subnets
+  crowdstrike-cid        = var.crowdstrike-cid
+}
+module "mastercard" {
+  source                 = "./services"
+  artifactory_secret_arn = var.artifactory_secret_arn
+  aws_region             = var.aws_region
+  chronos_url            = var.chronos_url
+  cluster_id             = var.cluster_id
+  cluster_name           = var.cluster_name
+  datadog_log_group      = var.dd_log_group_name
+  dd_api_key             = var.dd_api_key
+  dd_tag_cardinality     = var.dd_tag_cardinality
+  mock_version          = var.mock_version
+  environment            = var.environment
+  job_image              = var.mastercard_image
+  job_name               = var.mastercard_name
+  log_lambda_arn         = var.log_lambda_arn
+  log_script_filter      = var.log_script_filter
+  max_capacity           = var.mastercard_max
+  min_capacity           = var.mastercard_min
+  queue_name             = var.mastercard_queue_name
+  max_threshold          = var.mc_max_threshold
+  min_threshold          = var.mc_min_threshold
+  iam_role               = aws_iam_role.tagcore_instance_region_role.arn
+  sec_group              = aws_security_group.tagcore.id
+  subnet_ids             = var.priv_subnets
+  crowdstrike-cid        = var.crowdstrike-cid
+}
+module "partner" {
+  source                 = "./services"
+  artifactory_secret_arn = var.artifactory_secret_arn
+  aws_region             = var.aws_region
+  chronos_url            = var.chronos_url
+  cluster_id             = var.cluster_id
+  cluster_name           = var.cluster_name
+  datadog_log_group      = var.dd_log_group_name
+  dd_api_key             = var.dd_api_key
+  dd_tag_cardinality     = var.dd_tag_cardinality
+  mock_version          = var.mock_version
+  environment            = var.environment
+  job_image              = var.partner_image
+  job_name               = var.partner_name
+  log_lambda_arn         = var.log_lambda_arn
+  log_script_filter      = var.log_script_filter
+  max_capacity           = var.partner_max
+  min_capacity           = var.partner_min
+  queue_name             = var.partner_queue_name
+  max_threshold          = var.partner_max_threshold
+  min_threshold          = var.partner_min_threshold
+  iam_role               = aws_iam_role.tagcore_instance_region_role.arn
+  sec_group              = aws_security_group.tagcore.id
+  subnet_ids             = var.priv_subnets
+  crowdstrike-cid        = var.crowdstrike-cid
+}
+module "scheduled-event" {
+  source                 = "./services"
+  artifactory_secret_arn = var.artifactory_secret_arn
+  aws_region             = var.aws_region
+  chronos_url            = var.chronos_url
+  cluster_id             = var.cluster_id
+  cluster_name           = var.cluster_name
+  datadog_log_group      = var.dd_log_group_name
+  dd_api_key             = var.dd_api_key
+  dd_tag_cardinality     = var.dd_tag_cardinality
+  mock_version          = var.mock_version
+  environment            = var.environment
+  job_image              = var.scheduled-event_image
+  job_name               = var.scheduled-event_name
+  log_lambda_arn         = var.log_lambda_arn
+  log_script_filter      = var.log_script_filter
+  max_capacity           = var.scheduled-event_max
+  min_capacity           = var.scheduled-event_min
+  queue_name             = var.scheduled-event_queue_name
+  max_threshold          = var.schd_max_threshold
+  min_threshold          = var.schd_min_threshold
+  iam_role               = aws_iam_role.tagcore_instance_region_role.arn
+  sec_group              = aws_security_group.tagcore.id
+  subnet_ids             = var.priv_subnets
+  crowdstrike-cid        = var.crowdstrike-cid
+}
+module "statements" {
+  source                 = "./services"
+  artifactory_secret_arn = var.artifactory_secret_arn
+  aws_region             = var.aws_region
+  chronos_url            = var.chronos_url
+  cluster_id             = var.cluster_id
+  cluster_name           = var.cluster_name
+  datadog_log_group      = var.dd_log_group_name
+  dd_api_key             = var.dd_api_key
+  dd_tag_cardinality     = var.dd_tag_cardinality
+  mock_version          = var.mock_version
+  environment            = var.environment
+  job_image              = var.statements_image
+  job_name               = var.statements_name
+  log_lambda_arn         = var.log_lambda_arn
+  log_script_filter      = var.log_script_filter
+  max_capacity           = var.statements_max
+  min_capacity           = var.statements_min
+  queue_name             = var.statements_queue_name
+  max_threshold          = var.statements_max_threshold
+  min_threshold          = var.statements_min_threshold
+  iam_role               = aws_iam_role.tagcore_instance_region_role.arn
+  sec_group              = aws_security_group.tagcore.id
+  subnet_ids             = var.priv_subnets
+  crowdstrike-cid        = var.crowdstrike-cid
+}
+module "visa" {
+  source                 = "./services"
+  artifactory_secret_arn = var.artifactory_secret_arn
+  aws_region             = var.aws_region
+  chronos_url            = var.chronos_url
+  cluster_id             = var.cluster_id
+  cluster_name           = var.cluster_name
+  datadog_log_group      = var.dd_log_group_name
+  dd_api_key             = var.dd_api_key
+  dd_tag_cardinality     = var.dd_tag_cardinality
+  mock_version          = var.mock_version
+  environment            = var.environment
+  job_image              = var.visa_image
+  job_name               = var.visa_name
+  log_lambda_arn         = var.log_lambda_arn
+  log_script_filter      = var.log_script_filter
+  max_capacity           = var.visa_max
+  min_capacity           = var.visa_min
+  queue_name             = var.visa_queue_name
+  max_threshold          = var.visa_max_threshold
+  min_threshold          = var.visa_min_threshold
+  iam_role               = aws_iam_role.tagcore_instance_region_role.arn
+  sec_group              = aws_security_group.tagcore.id
+  subnet_ids             = var.priv_subnets
+  crowdstrike-cid        = var.crowdstrike-cid
+}
+module "finserv" {
+  source                 = "./services"
+  artifactory_secret_arn = var.artifactory_secret_arn
+  aws_region             = var.aws_region
+  chronos_url            = var.chronos_url
+  cluster_id             = var.cluster_id
+  cluster_name           = var.cluster_name
+  datadog_log_group      = var.dd_log_group_name
+  dd_api_key             = var.dd_api_key
+  dd_tag_cardinality     = var.dd_tag_cardinality
+  mock_version          = var.mock_version
+  environment            = var.environment
+  job_image              = var.finserv_image
+  job_name               = var.finserv_name
+  log_lambda_arn         = var.log_lambda_arn
+  log_script_filter      = var.log_script_filter
+  max_capacity           = var.finserv_max
+  min_capacity           = var.finserv_min
+  queue_name             = var.finserv_queue_name
+  max_threshold          = var.finserv_max_threshold
+  min_threshold          = var.finserv_min_threshold
+  iam_role               = aws_iam_role.tagcore_instance_region_role.arn
+  sec_group              = aws_security_group.tagcore.id
+  subnet_ids             = var.priv_subnets
+  crowdstrike-cid        = var.crowdstrike-cid
+}

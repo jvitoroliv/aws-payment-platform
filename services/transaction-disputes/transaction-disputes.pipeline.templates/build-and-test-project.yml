@@ -1,0 +1,142 @@
+# build-and-test-project.yml — build pipeline
+
+# build-and-test-project.yml — build pipeline
+
+parameters:
+- name: AGENT_POOL_NAME
+  type: string
+- name: APPLICATION_PROJECT_NAME
+  type: string
+- name: APPLICATION_TEST_PROJECT_NAME
+  type: string
+- name: TEST_RESULTS_ARTIFACT_NAME
+  type: string
+- name: JOB_NAME
+  type: string
+- name: DEPENDENT_JOB_NAME
+  type: string
+- name: COVERAGE_INCLUDE_FILTER
+  type: string
+- name: REQUIRE_COVERAGE_THRESHOLD
+  type: boolean
+  default: true
+
+jobs:
+- job: '${{ parameters.JOB_NAME }}'
+  displayName: "Build and test ${{ parameters.APPLICATION_PROJECT_NAME }}"
+  dependsOn: '${{ parameters.DEPENDENT_JOB_NAME }}'
+  workspace:
+    clean: all
+  variables:
+    disable.coverage.autogenerate: 'true'
+    testResultsFolderName: 'TestResults'
+    coverageResultsFolderName: 'CoverageResults'
+    buildContainerName: '$(Build.BuildNumber)_build_container'
+    buildContainerSourceFolderName: 'src'
+    ${{ if eq(parameters.REQUIRE_COVERAGE_THRESHOLD, true) }}:
+      codeCoverageThresholdPercentage: 80
+    ${{ else }}:
+      codeCoverageThresholdPercentage: 0
+
+  pool:
+    name: '${{ parameters.AGENT_POOL_NAME }}'
+
+  steps:
+  - checkout: self
+    clean: true
+    displayName: 'Checkout the source repository'
+
+  - script: 'mkdir ${{ parameters.TEST_RESULTS_ARTIFACT_NAME }}'
+    displayName: "Create test results artifact folder"
+    enabled: true
+
+  - task: Docker@0
+    inputs:
+      containerregistrytype: Container Registry
+      action: Run a Docker command
+      customCommand: image build -t $(buildContainerName) --label "$(Build.BuildNumber)" -f payment-service.pipeline.templates/BuildContainer_Dockerfile payment-service.pipeline.templates
+    displayName: Create build container
+    enabled: true
+
+  - task: Docker@0
+    inputs:
+      containerregistrytype: Container Registry
+      action: Run a Docker command
+      customCommand: run --privileged -id --name $(buildContainerName) $(buildContainerName)
+    displayName: Run the build container
+    enabled: true
+
+  - task: Docker@0
+    inputs:
+      containerregistrytype: Container Registry
+      action: Run a Docker command
+      customCommand: cp $(System.DefaultWorkingDirectory) $(buildContainerName):/$(buildContainerSourceFolderName)
+    displayName: Copy source code to build container
+    enabled: true
+
+  - task: Docker@0
+    inputs:
+      containerregistrytype: Container Registry
+      action: Run a Docker command
+      customCommand: 'exec --privileged -w /$(buildContainerSourceFolderName)/${{ parameters.APPLICATION_PROJECT_NAME }} $(buildContainerName) dotnet build -c Release -warnaserror'
+    displayName: Build project
+    enabled: true
+
+  - task: Docker@0
+    inputs:
+      containerregistrytype: Container Registry
+      action: Run a Docker command
+      customCommand: 'exec --privileged -w /$(buildContainerSourceFolderName)/${{ parameters.APPLICATION_TEST_PROJECT_NAME }} $(buildContainerName) dotnet build -c Release -warnaserror'
+    displayName: Build test project
+    enabled: true
+
+  - task: Docker@0
+    inputs:
+      containerregistrytype: Container Registry
+      action: Run a Docker command
+      customCommand: 'exec --privileged -w /$(buildContainerSourceFolderName)/${{ parameters.APPLICATION_TEST_PROJECT_NAME }} $(buildContainerName) dotnet test -l "trx;LogFileName=${{ parameters.APPLICATION_PROJECT_NAME }}.$(testResultsFolderName).trx" /p:CollectCoverage=true /p:Include=${{ parameters.COVERAGE_INCLUDE_FILTER }} /p:Threshold=$(codeCoverageThresholdPercentage) /p:ThresholdType="line%2cbranch" /p:CoverletOutputFormat=cobertura /p:CoverletOutput=$(coverageResultsFolderName)/${{ parameters.APPLICATION_PROJECT_NAME }}.$(coverageResultsFolderName).xml'
+    displayName: Run unit tests
+    enabled: true
+
+  - task: Docker@0
+    inputs:
+      containerregistrytype: Container Registry
+      action: Run a Docker command
+      customCommand: 'cp $(buildContainerName):/$(buildContainerSourceFolderName)/${{ parameters.APPLICATION_TEST_PROJECT_NAME }}/$(testResultsFolderName)/. $(System.DefaultWorkingDirectory)/${{ parameters.TEST_RESULTS_ARTIFACT_NAME }}/$(testResultsFolderName)'
+    displayName: Copy unit test results to agent machine
+    continueOnError: true
+    enabled: true
+
+  - task: Docker@0
+    inputs:
+      containerregistrytype: Container Registry
+      action: Run a Docker command
+      customCommand: 'cp $(buildContainerName):/$(buildContainerSourceFolderName)/${{ parameters.APPLICATION_TEST_PROJECT_NAME }}/$(coverageResultsFolderName)/. $(System.DefaultWorkingDirectory)/${{ parameters.TEST_RESULTS_ARTIFACT_NAME }}/$(coverageResultsFolderName)'
+    displayName: Copy code coverage results to agent machine
+    continueOnError: false
+    enabled: true
+
+  - task: PublishPipelineArtifact@1
+    inputs:
+      path: $(System.DefaultWorkingDirectory)/${{ parameters.TEST_RESULTS_ARTIFACT_NAME }}
+      artifactName: ${{ parameters.TEST_RESULTS_ARTIFACT_NAME }}
+      displayName: Publish test artifacts
+      enabled: true
+
+  - task: Docker@0
+    condition: always()
+    inputs:
+      containerregistrytype: Container Registry
+      action: Run a Docker command
+      customCommand: stop $(buildContainerName)
+    displayName: Stop build container
+    enabled: true
+
+  - task: Docker@0
+    condition: always()
+    inputs:
+      containerregistrytype: Container Registry
+      action: Run a Docker command
+      customCommand: rm --force $(buildContainerName)
+    displayName: Remove build container
+    enabled: true

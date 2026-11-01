@@ -1,0 +1,115 @@
+# Variable 'ResultsFilename' defined in the Variables tab
+# Variable 'DestinationEmail' defined in the Variables tab
+
+name: $(date:yyyyMMdd).$(BuildId)
+
+trigger: none
+
+variables:
+- group: Octopus
+- name: Branch
+  value: $(BUILD.SOURCEBRANCHNAME)
+- name: Configuration
+  value: Debug
+- name: Channel
+  value: Custom
+stages:
+- stage: BuildBranch_Stage
+  jobs:
+  - job: Build_Job
+    displayName: Build Custom Extract Private Branch
+    pool:
+      name: CoreService-Code-Deploy
+    steps:
+    - checkout: self
+      clean: true
+      fetchTags: true
+    - task: PowerShell@1
+      name: CreateParametersFile_Task
+      displayName: Create Parameters File
+      inputs:
+        scriptName: $(Build.SourcesDirectory)\deployment\scripts\OnPrem_CreateCustomExtractParameters.ps1
+    - task: MSBuild@1
+      name: BuildCustomExtractCode_Task
+      displayName: Build Custom Extract Code
+      inputs:
+        solution: OnPrem_BuildCustomWork.proj
+        platform: Any CPU
+        configuration: $(Configuration)
+    - task: PublishPipelineArtifact@1
+      name: PushCustomExtractParameters_Task
+      displayName: Push Custom Extract Parameters
+      inputs:
+        targetPath: $(Build.SourcesDirectory)\CustomExtractParameters\
+        artifactName: CustomExtractParameters
+    - task: PublishPipelineArtifact@1
+      name: PushOctoRelease_Task
+      displayName: Push OctoRelease Artifact
+      inputs:
+        targetPath: $(Build.SourcesDirectory)\Work\$(Configuration)\CustomWork\OctoRelease.txt
+        artifactName: OctoRelease
+    - task: PublishPipelineArtifact@1
+      name: PushDeploymentScriptsArtifact_Task
+      displayName: Push DeploymentScripts Artifact
+      inputs:
+        targetPath: $(Build.SourcesDirectory)\deployment\scripts
+        artifactName: DeploymentScripts
+    - task: PublishPipelineArtifact@1
+      name: PushOctoEXEArtifact_Task
+      displayName: Push OctoEXE Artifact
+      inputs:
+        targetPath: $(Build.SourcesDirectory)\src\Tools\Octopus\Octo.exe
+        artifactName: OctoEXE
+    - task: CopyFiles@2
+      name: CopyFilesToOctopusFeed_Task
+      displayName: Copy Files to OctopusFeed
+      inputs:
+        sourceFolder: $(Build.SourcesDirectory)\Work\Debug\DeploymentFeed
+        targetFolder: $(OctopusFeed)
+    - task: MSBuild@1
+      name: BuildCustomExtractReleases_Task
+      displayName: Build Custom Extract Releases
+      inputs:
+        solution: OnPrem_BuildCustomWork.proj
+        platform: Any CPU
+        configuration: $(Configuration)
+        msbuildArguments: /target:CreateReleases
+- stage: RunCustomExtract_Stage
+  jobs:
+  - job: RunCustomExract_Job
+    displayName: Run Custome Extract on Octopus
+    pool:
+      name: CoreService-Octopus
+    steps:
+    - checkout: none
+    - task: DownloadPipelineArtifact@2
+      name: PullCustomExtractArtifacts_Task
+      displayName: Download Custom Extract Artifacts
+      inputs:
+        path: $(System.ArtifactsDirectory)\CustomExtractArtifacts
+    - task: PowerShell@2
+      name: CustomExtractParameters_Task
+      displayName: View Custom Extract Parameters
+      inputs:
+        targetType: inline
+        script: |
+          $params = Get-Content "$(System.ArtifactsDirectory)\CustomExtractArtifacts\CustomExtractParameters\CustomExtractParameters.json" -raw | ConvertFrom-Json
+          $fi = $params.FI
+          $env = $params.Environment
+          $testname = $params.TestName
+          $resultsfilename = $params.ResultsFilename
+          $destinationemail = $params.DestinationEmail
+          
+          write-host "FI is $fi"
+          write-host "Environment is $env"
+          write-host "TestName is $testname"
+          write-host "ResultsFilename is $resultsfilename"
+          write-host "DestinationEmail is $destinationemail"
+    - task: PowerShell@2
+      name: RunCustomExtractOcto_Task
+      displayName: Run Custom Extract on Octopus
+      inputs:
+        targetType: filePath
+        filePath: '$(System.ArtifactsDirectory)/CustomExtractArtifacts/DeploymentScripts/OnPrem_CustomExtract_Run.ps1'
+        arguments: -workdir "$(System.ArtifactsDirectory)" -OctopusUrl "$(OctopusUrl)" -OctopusAPIkey "$(OctopusAPIkey)"
+...

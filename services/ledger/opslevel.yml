@@ -1,0 +1,35 @@
+# opslevel.yml
+# opslevel configuration
+# Maintained by: Platform Engineering
+
+# opslevel.yml — opslevel configuration
+
+---
+version: 1
+service:
+  name: ps-tag-ledger
+  lifecycle: pre-alpha
+  tier: tier_4
+  product: The Product Name
+  owner: tag
+  language: golang
+  framework: terraform
+  description: TAG Ledger Activity Stream
+  aliases:
+    - example-org/ps-tag-ledger
+  repositories:
+    - name: example-org/ps-tag-ledger
+      path: "/"
+      provider: github
+  tools: []
+  dependencies: []
+  tags:
+  - key: containerized
+    value: yes
+  - key: pci
+    value: no
+  - key: scope
+    value: internal
+  - key: type
+    value: backend
+    

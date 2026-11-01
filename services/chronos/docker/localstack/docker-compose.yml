@@ -1,0 +1,86 @@
+# docker-compose.yml
+# local development environment
+
+services:
+  tf_chronos:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    platform: ${TARGETPLATFORM} # Dynamically set based on the host architecture
+    depends_on:
+      - localstack
+    container_name: "tf_chronos"
+    # GitHub Environment — enables deployment protection rules and secrets scoping
+    environment:
+      - TF_VAR_local_subnet_id=${TF_VAR_local_subnet_id}
+      - MONGO_URI=mongodb://mongo:27017
+    volumes:
+      - ./../../terraform:/src/terraform/
+
+  localstack:
+    image: localstack/localstack:4.4.0
+    ports:
+      - "127.0.0.1:4566:4566" # LocalStack Gateway
+      - "127.0.0.1:4510-4559:4510-4559" # external services port range
+    environment:
+      - DEBUG=1
+      # To Enable LocalStack Traces uncomment the line below
+      # - LS_LOG=trace-internal
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      - TF_LOG=TRACE
+      - LAMBDA_EXECUTOR=docker
+      - LAMBDA_REMOTE_DOCKER=true
+      - MONGO_URI=mongodb://mongo:27017
+
+    volumes:
+      - localstack-data:/var/lib/localstack
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  builder:
+    build:
+      context: ./../builder/.
+    container_name: builder
+    platform: ${TARGETPLATFORM} # Dynamically set based on the host architecture
+    environment:
+      - GOOS=linux
+      - GOARCH=${TARGETARCH} # Automatically set GOARCH based on host architecture
+      - CGO_ENABLED=0
+      - GIT_COMMIT="${GIT_COMMIT:-local}"
+      - MONGO_URI=mongodb://mongo:27017
+      - MEMONGO_MONGOD_BIN=/usr/bin/mongod # FIXME This doesn't look like it exists or is being used.
+      - DOCKER_DEFAULT_PLATFORM=${TARGETPLATFORM} # Use the platform specified by the host
+    volumes:
+      - ../../:/go/src/github.com/example-org/ps-tag-chronos
+    working_dir: /go/src/github.com/example-org/ps-tag-chronos
+    depends_on:
+      - mongo
+      - aspire-dashboard
+    command: bash -c "npm install mongoose && node docker/builder/createDatabase.js"
+
+  mongo:
+    image: mongo:7.0
+    ports:
+      - "27019:27017"
+
+  datadog-agent:
+    image: gcr.io/datadoghq/agent:7
+    environment:
+      DD_API_KEY: ${DD_API_KEY}
+      DD_HOSTNAME: unpaid-balances-event-handler-local-testing
+      DD_ENV: local
+    expose:
+      - "4317"
+      - "4318"
+    profiles:
+      - dd
+
+  aspire-dashboard:
+    image: mcr.microsoft.com/dotnet/nightly/aspire-dashboard:8.0.0-preview.6
+    environment:
+      DOTNET_DASHBOARD_UNSECURED_ALLOW_ANONYMOUS: "true"
+    ports:
+      - "18889:18889"
+      - "18888:18888"
+
+volumes:
+  localstack-data:

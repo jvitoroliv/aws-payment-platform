@@ -1,0 +1,188 @@
+# NightlyTests.yaml
+# NightlyTests configuration
+
+trigger: none
+
+schedules:
+- cron: '0 12 * * 1,2,3,4,5'
+  displayName: weekdays 12.00PM UTC
+  branches:
+    include:
+    - Major
+    
+jobs:
+- job: Nightly_Tests
+  displayName: Nightly Tests
+  timeoutInMinutes: 0
+  pool:
+    name: CoreService-Nightly
+    demands:
+    - msbuild
+    - vstest
+  workspace:
+    clean: all
+  steps:
+  - checkout: self
+    clean: true
+    
+  - task: MSBuild@1
+    displayName: Build solution NightlyTests.proj
+    inputs:
+      solution: NightlyTests.proj
+      msbuildVersion: 17.0
+      platform: Any CPU
+      configuration: Release
+      clean: true
+      
+  - task: VSTest@1
+    displayName: Run BrandSync.Test
+    continueOnError: True
+    inputs:
+      testAssembly: .\Work\**\BrandSync.Test.dll
+      runSettingsFile: src/LocalTestRun.testrunconfig
+      runInParallel: False
+      vsTestVersion: latest
+      
+  - task: VSTest@1
+    displayName: Run CommunicationService MSTests
+    continueOnError: True
+    inputs:
+      testAssembly: .\Work\**\Aoc.CommunicationService.MSTest.dll
+      runSettingsFile: src/LocalTestRun.testrunconfig
+      codeCoverageEnabled: false
+      vsTestVersion: latest
+      otherConsoleOptions: '/Framework:.NETFramework,Version=v4.7.2'
+      
+  - task: VSTest@1
+    displayName: Run ProcessorService MSTest
+    continueOnError: True
+    inputs:
+      testAssembly: .\Work\**\Aoc.CorePlatform.ProcessorService.MSTest.dll
+      runSettingsFile: src/LocalTestRun.testrunconfig
+      codeCoverageEnabled: false
+      vsTestVersion: latest
+      
+  - task: VSTest@1
+    displayName: Run ReportEngine MSTest
+    continueOnError: True
+    inputs:
+      testAssembly: .\Work\**\Aoc.CorePlatform.ReportEngine.MSTest.dll
+      runSettingsFile: src/LocalTestRun.testrunconfig
+      codeCoverageEnabled: false
+      vsTestVersion: latest
+      
+  - task: VSTest@1
+    displayName: Run Settings MSTest
+    continueOnError: True
+    inputs:
+      testAssembly: .\Work\**\Aoc.CorePlatform.Settings.MSTest.dll
+      runSettingsFile: src/LocalTestRun.testrunconfig
+      codeCoverageEnabled: false
+      vsTestVersion: latest
+      
+  - task: VSTest@1
+    displayName: Run ThreeDeltaFailurReplayJob MSTest
+    continueOnError: True
+    inputs:
+      testAssembly: .\Work\**\Aoc.CorePlatform.ThreeDeltaFailureReplayJob.MSTest.dll
+      runSettingsFile: src/LocalTestRun.testrunconfig
+      codeCoverageEnabled: false
+      vsTestVersion: latest
+      
+  - task: VSTest@1
+    displayName: Run NotifyMe MSTest
+    continueOnError: True
+    inputs:
+      testAssembly: .\Work\**\Aoc.NotifyMe.MSTest.dll
+      runSettingsFile: src/LocalTestRun.testrunconfig
+      codeCoverageEnabled: false
+      vsTestVersion: latest
+      
+  - task: VSTest@1
+    displayName: Run PayOnline MSTest
+    continueOnError: True
+    inputs:
+      testAssembly: .\Work\**\Aoc.PayOnline.MSTest.dll
+      runSettingsFile: src/LocalTestRun.testrunconfig
+      codeCoverageEnabled: false
+      vsTestVersion: latest
+      
+  - task: VSTest@1
+    displayName: Run APReconciliation MSTest
+    continueOnError: True
+    inputs:
+      testAssembly: .\Work\**\APReconciliation.MSTest.dll
+      runSettingsFile: src/LocalTestRun.testrunconfig
+      codeCoverageEnabled: false
+      vsTestVersion: latest
+      
+  - task: VSTest@1
+    displayName: Run Web.Common MSTest
+    continueOnError: True
+    inputs:
+      testAssembly: .\Work\**\CorePlatform.Web.Common.MSTest.dll
+      runSettingsFile: src/LocalTestRun.testrunconfig
+      codeCoverageEnabled: false
+      vsTestVersion: latest
+      
+  - task: VSTest@1
+    displayName: Run ProcessJobs MSTest
+    continueOnError: True
+    inputs:
+      testAssembly: .\Work\**\ProcessJobs.MSTest.dll
+      runSettingsFile: src/LocalTestRun.testrunconfig
+      codeCoverageEnabled: false
+      vsTestVersion: latest
+      
+  - task: VSTest@1
+    displayName: Run TestUtilities MSTest
+    continueOnError: True
+    inputs:
+      testAssembly: .\Work\**\TestUtilities.MSTest.dll
+      runSettingsFile: src/LocalTestRun.testrunconfig
+      codeCoverageEnabled: false
+      vsTestVersion: latest
+      
+  - task: VSTest@1
+    displayName: Run Utilties MSTest
+    continueOnError: True
+    inputs:
+      testAssembly: .\Work\**\Utilities.MSTest.dll
+      runSettingsFile: src/LocalTestRun.testrunconfig
+      codeCoverageEnabled: false
+      vsTestVersion: latest
+      
+  - task: VSTest@1
+    displayName: Run TAG Integration MSTest
+    continueOnError: True
+    inputs:
+      testAssembly: .\Work\**\AOCProcessor.Test.dll
+      runInParallel: False
+      vsTestVersion: latest
+      
+  - task: VSTest@1
+    displayName: Run BusinessRules MSTest
+    continueOnError: True
+    inputs:
+      testAssembly: .\Work\**\BusinessRules.MSTest.dll
+      runSettingsFile: src/LocalTestRun.testrunconfig
+      codeCoverageEnabled: false
+      vsTestVersion: latest
+      
+  - task: VSTest@1
+    displayName: Run ImportJobs.Tests
+    continueOnError: True
+    inputs:
+      testAssembly: .\Work\**\ImportJobs.Tests.dll
+      runSettingsFile: src/LocalTestRun.testrunconfig
+      runInParallel: False
+      vsTestVersion: latest
+      
+  - task: MSBuild@1
+    displayName: Run NUnit tests
+    continueOnError: True
+    inputs:
+      solution: NightlyTests.proj
+      platform: Any CPU
+      configuration: Release
+      msbuildArguments: /target:NUnit

@@ -1,0 +1,20 @@
+# docker-compose.local_test.yml
+# local development environment
+
+services:
+  kafka:
+    ports:
+      - "7777:7777"
+      - "27777:27777"
+
+  karapace-registry:
+    ports:
+      - "7878:7878"
+
+  kafka-ui:
+    ports:
+      - "8083:8080"
+
+  mongo-database:
+    ports:
+      - "27017:27017"

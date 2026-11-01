@@ -1,0 +1,82 @@
+#!groovy
+
+properties(
+        [
+                parameters([
+                        choice(choices: ["dev", "test", "stage", "prod"].join("\n"),
+                                description: 'environment',
+                                name: 'ENVIRONMENT')
+                ]),
+                ([
+                        $class       : 'DatadogJobProperty',
+                        tagProperties: "jenkins.job.duration,jenkins.job.status"
+                ])
+        ]
+)
+
+disableConcurrentBuilds()
+
+node("${params.ENVIRONMENT}") {
+
+    def devCodeBranch = "master"
+
+    stage('Prep') {
+        buildName "${env.BUILD_NUMBER}) ${params.ENVIRONMENT}"
+        buildDescription "${params.ENVIRONMENT} => Global Configuration\n"
+        env.AWS_DEFAULT_REGION = "us-east-1"
+        cleanWs()
+    }
+
+    Exception buildError // error to send to Google Chat
+    ansiColor('xterm') {
+        try {
+            checkout scm
+
+            def tfContainer = docker.image("hashicorp/terraform:1.6.5")
+
+            notifyGoogleNewDeploy()
+
+            tfContainer.inside("--entrypoint=''") {
+                stage('Plan') {
+                    dir("terraform/environments/${params.ENVIRONMENT}/global") {
+                        sh "terraform init -backend-config=${params.ENVIRONMENT}.backend"
+                        sh "terraform plan -out=${params.ENVIRONMENT}_global.planfile"
+                    }
+                }
+            }
+            userInputProceed(params.ENVIRONMENT)
+
+            tfContainer.inside("--entrypoint=''") {
+                stage('Apply') {
+                    dir("terraform/environments/${params.ENVIRONMENT}/global") {
+                        sh "terraform init -reconfigure -backend-config=${params.ENVIRONMENT}.backend"
+                        sh "terraform apply -auto-approve ${params.ENVIRONMENT}_global.planfile"
+                    }
+                }
+            }
+        } catch (Exception e) {
+            currentBuild.result = 'FAILURE'
+            println e.toString()
+        } finally {
+            notifyGoogle(currentBuild.result, "OPS Deployment Build")
+        }
+    }
+}
+
+def userInputProceed(environment) {
+    def proceed = false
+    if (environment == 'dev' || environment == 'test') {
+        proceed = true
+    } else {
+        timeout(time: 1, unit: 'HOURS') {
+            proceed = input(
+                    id: "${environment}", message: 'Do you approve?', parameters: [
+                    [$class: 'BooleanParameterDefinition', defaultValue: true, description: '', name: 'Please confirm Deployment']
+            ])
+        }
+    }
+
+    if(!proceed) {
+        error "User decided not to proceed"
+    }
+}

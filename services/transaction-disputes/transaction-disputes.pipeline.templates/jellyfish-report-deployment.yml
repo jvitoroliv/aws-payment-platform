@@ -1,0 +1,86 @@
+# jellyfish-report-deployment.yml
+# deployment automation
+
+parameters:
+- name: DEPENDENT_JOB_NAME
+  type: string
+- name: VARIABLES_JOB_NAME
+  type: string
+- name: VARIABLES_TASK_NAME
+  type: string
+- name: JELLYFISH_JOB_NAME
+  type: string
+- name: SERVICE_CONNECTION_NAME
+  type: string
+- name: JELLYFISH_API_TOKEN
+  type: string
+- name: JELLYFISH_IS_DRY_RUN
+  type: boolean
+  default: false
+- name: JELLYFISH_SOURCE_URL
+  type: string
+
+jobs:
+  - job: ${{ parameters.VARIABLES_JOB_NAME }}
+    displayName: "Generate Jellyfish Deployment Values"
+    workspace:
+      clean: all
+    dependsOn: ${{ parameters.DEPENDENT_JOB_NAME }}
+    condition: always()
+    pool:
+      vmImage: windows-2025
+
+    steps:
+    - checkout: none
+
+    - task: PowerShell@2
+      name: ${{ parameters.VARIABLES_TASK_NAME }}
+      inputs:
+        targetType: 'inline'
+        script: |
+          $referenceId = [guid]::NewGuid()
+          $timeStamp = Get-Date -Format "yyyy-MM-ddThh:mm:ss"
+          Write-Host "##vso[task.setvariable variable=ReferenceId;isOutput=true]$referenceId"
+          Write-Host "##vso[task.setvariable variable=TimeStamp;isOutput=true]$timeStamp"
+
+  - job: ${{ parameters.JELLYFISH_JOB_NAME }}
+    displayName: "Call Jellyfish API"
+    pool: server
+    dependsOn:
+      - ${{ parameters.VARIABLES_JOB_NAME }}
+    condition: |
+      and(
+        always(),
+        ne(dependencies.${{ parameters.VARIABLES_JOB_NAME }}.outputs['${{ parameters.VARIABLES_TASK_NAME }}.ReferenceId'], ''),
+        ne(dependencies.${{ parameters.VARIABLES_JOB_NAME }}.outputs['${{ parameters.VARIABLES_TASK_NAME }}.TimeStamp'], '')
+      )
+    variables:
+      referenceId: $[ dependencies.${{ parameters.VARIABLES_JOB_NAME }}.outputs['${{ parameters.VARIABLES_TASK_NAME }}.ReferenceId'] ]
+      timeStamp: $[ dependencies.${{ parameters.VARIABLES_JOB_NAME }}.outputs['${{ parameters.VARIABLES_TASK_NAME }}.TimeStamp'] ]
+    steps:
+    - task: InvokeRESTAPI@1
+      displayName: "Report Jellyfish Deployment"
+      inputs:
+        connectionType: 'connectedServiceName'
+        serviceConnection: ${{ parameters.SERVICE_CONNECTION_NAME }}
+        method: 'POST'
+        headers: |
+          {
+            "Content-Type": "application/json",
+            "X-jf-api-token": "${{ parameters.JELLYFISH_API_TOKEN }}",
+            "X-jf-api-dry-run": "${{ parameters.JELLYFISH_IS_DRY_RUN }}",
+            "X-jf-api-backfill-commits": "true"
+          }
+        body: |
+          {
+            "reference_id": "$(referenceId)",
+            "name": "$(Build.BuildNumber)",
+            "deployed_at": "$(timeStamp)",
+            "repo_name": "$(Build.Repository.Name)",
+            "commit_shas": ["$(Build.SourceVersion)"],
+            "source_url": "${{ parameters.JELLYFISH_SOURCE_URL }}",
+            "labels": ["Payment Processing", "Transaction Disputes", "platform-services"],
+            "is_successful": "true"
+          }
+        waitForCompletion: 'false'
+      enabled: false

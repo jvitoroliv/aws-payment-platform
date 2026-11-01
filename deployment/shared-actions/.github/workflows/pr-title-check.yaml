@@ -1,0 +1,102 @@
+# pr-title-check.yaml
+# pr-title-check configuration
+
+---
+name: PR Title Validation
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: The semver of the workflow for automated tagging.
+        default: 1.0.0
+        type: string
+        required: false
+      skip_author_list:
+        description: List of authors to skip validation in the repo.
+        type: string
+        required: true
+      jira_project:
+        description: JIRA Project Key.
+        type: string
+        required: true
+
+jobs:
+  check-title:
+    runs-on: ["self-hosted", "tag-dev"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Retrive secrets from Vault
+        uses: example-org/fabric-action-hashi-vault@v1
+        with:
+          namespace: admin/tag/applications
+          role_name: dev-aws-role
+          secrets: |
+            ci/kvv2/shared-actions/jira_credentials JIRA_USER | JIRA_USER
+            ci/kvv2/shared-actions/jira_credentials JIRA_TOKEN | JIRA_TOKEN
+
+      - name: Validate if ticket exists in Jira
+        run: |
+          #!/bin/bash
+
+          # Skip authors check
+          IFS=','
+          set -- "$SKIP_AUTHOR_LIST"
+          unset IFS
+
+          PR_AUTHOR=$(jq -r '.pull_request.user.login' "$GITHUB_EVENT_PATH")
+
+          for SKIP_AUTHOR in "$@"; do
+            if [ "$PR_AUTHOR" = "$SKIP_AUTHOR" ]; then
+              echo "Skip validation for author: $PR_AUTHOR"
+              exit 0
+            fi
+          done
+
+          # PR title validation
+          PR_TITLE=$(jq -r '.pull_request.title' "$GITHUB_EVENT_PATH")
+          echo "Checking PR $PR_TITLE..."
+
+          if [[ "$PR_TITLE" =~ ^([A-Z]+[A-Z0-9_]*-[0-9]+)(:|\ |\ -) ]]; then
+            TICKET_ID="${BASH_REMATCH[1]}"
+            TICKET_PREFIX=$(echo "$TICKET_ID" | cut -d'-' -f1)
+            if [[ "$TICKET_PREFIX" != "$JIRA_PROJECT" ]]; then
+              echo "Jira ticket prefix mismatch. Expected $JIRA_PROJECT, Found: $TICKET_PREFIX"
+              exit 1
+            else
+              echo "Jira ticket naming format detected : $PR_TITLE and prefix match with the project - Checking for a Jira Ticket..."
+            fi
+          else
+            echo "Jira ticket naming was not detected, must start with a Jira ticket (e.g., ABC-99999: or ABC-99999 or ABC-99999 - followed by description)"
+            exit 1
+          fi
+
+          # Jira API verification
+          JIRA_RESPONSE=$(curl -s -u "$JIRA_USER:$JIRA_TOKEN" -X GET -H "Accept: application/json" "$JIRA_SERVER/rest/api/3/issue/$TICKET_ID?fields=status")
+          STATUS_NAME=$(echo "$JIRA_RESPONSE" | jq -r '.fields.status.name')
+
+
+          if echo "$JIRA_RESPONSE" | grep -q '"key":"'"$TICKET_ID"'"'; then
+            echo "Jira ticket exists: $TICKET_ID - Checking if is an active ticket..."
+
+            if [[ "$STATUS_NAME" == "Done" || "$STATUS_NAME" == "Closed" || "$STATUS_NAME" == "done" || "$STATUS_NAME" == "closed" ]]; then
+              echo "Jira ticket $TICKET_ID is not active. PR can not be created"
+              exit 1
+            else
+              echo "Ticket $TICKET_ID is active"
+              echo "Ticket status: $STATUS_NAME  PR validation successful"
+              exit 0
+            fi
+          else
+            echo "Jira ticket '$TICKET_ID' does not exists or is not verifiable"
+            exit 1
+          fi
+
+        env:
+          JIRA_SERVER: "https://example-org.atlassian.net"
+          JIRA_USER: ${{ env.JIRA_USER }}
+          JIRA_TOKEN: ${{ env.JIRA_TOKEN }}
+          SKIP_AUTHOR_LIST: ${{ inputs.skip_author_list }}
+          JIRA_PROJECT: ${{ inputs.jira_project }}

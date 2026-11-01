@@ -1,0 +1,123 @@
+# producer_failover.yml
+# producer_failover configuration
+
+name: Producer Failover/Failback
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to failover (e.g., test, prod)'
+        required: true
+        type: choice
+        options:
+          - dev
+          - test
+          - stage
+          - prod
+      action:
+        description: 'Action to perform (e.g., failover, failback)'
+        required: true
+        type: choice
+        options:
+          - failover # us-east-1 to us-west-2
+          - failback # us-west-2 to us-east-1
+
+jobs:
+  dry-run:
+    name: Dry Run
+    runs-on: ["tag-${{ inputs.environment }}", "self-hosted"]
+    outputs:
+      dry_run_output: ${{ steps.dry-run.outputs.output }}
+
+    permissions:
+      # Required for Workload Identity Federation with GCP.
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Install dependencies
+        working-directory: scripts/producer_failover
+        run: pip install -r requirements.txt
+
+      - name: Run dry-run for ${{ inputs.action }}
+        working-directory: scripts/producer_failover
+        run: |
+          OUTPUT=$(python producer_failover.py \
+            --action ${{ inputs.action }} \
+            --environment ${{ inputs.environment }} \
+            --dryrun 2>&1)
+          
+          echo $OUTPUT
+          # Write to step summary with proper formatting
+          echo "## Dry Run Output for ${{ inputs.action }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "$OUTPUT" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+          if echo "$OUTPUT" | grep -q "ERROR"; then
+            echo "Found ERROR in output. Failing the workflow."
+            exit 1
+          fi
+
+  wait-for-approval:
+    name: Approval Check
+    runs-on: [ "tag-${{ inputs.environment }}", "self-hosted" ]
+    needs:
+      - dry-run
+    environment:
+      name: ${{ inputs.environment }}
+    steps:
+      - run: |
+          echo "Deployment approved."
+
+  execute:
+    name: Execute
+    needs:
+      - wait-for-approval
+      - dry-run
+    runs-on: ["tag-${{ inputs.environment }}", "self-hosted"]
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Install dependencies
+        working-directory: scripts/producer_failover
+        run: pip install -r requirements.txt
+
+      - name: Execute ${{ inputs.action }}
+        working-directory: scripts/producer_failover
+        run: |
+          OUTPUT=$(python producer_failover.py \
+            --action ${{ inputs.action }} \
+            --environment ${{ inputs.environment }} 2>&1)
+
+          echo "## Execution Output for ${{ inputs.action }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "$OUTPUT" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          
+          if echo "$OUTPUT" | grep -q "ERROR"; then
+            echo "Found ERROR in output. Failing the workflow."
+            exit 1
+          fi

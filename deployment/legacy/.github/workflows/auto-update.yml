@@ -1,0 +1,32 @@
+# auto-update.yml
+# auto-update configuration
+
+---
+# see: https://github.com/example-org/auto-update
+name: auto-update
+on:
+  push:
+    branches:
+      - Major
+
+jobs:
+  auto-update:
+    name: auto-update
+    runs-on: coreplatform-dev
+    steps:
+      - name: generate-token
+        id: generate_token
+        uses: tibdex/github-app-token@v1
+        with:
+          app_id: 393558
+          installation_id: 42070849
+          private_key: ${{ secrets.PRIVATE_KEY }}
+
+      - uses: example-org/auto-update@v1
+        with:
+          github_token: ${{ steps.generate_token.outputs.token }}
+          include_renovate: true
+          max_prs: 1
+          # required_label: update:auto
+          # ignore_auto_merge: false
+          # max_prs: 10

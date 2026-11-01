@@ -1,0 +1,14 @@
+# default owner
+* @example-org/cpt-code-reviewers-major-branch
+/src/WindowsApplicationProjects/InvoiceParser/LibraryAssemblies/InvoiceEngine/** @example-org/cpt-code-reviewers-invoice-parser @example-org/cpt-code-reviewers-major-branch
+/src/WindowsApplicationProjects/InvoiceParser/LibraryAssemblies/InvoiceParser.Common/** @example-org/cpt-code-reviewers-invoice-parser @example-org/cpt-code-reviewers-major-branch
+/src/WindowsApplicationProjects/InvoiceParser/LibraryAssemblies/InvoiceParser.DAL/** @example-org/cpt-code-reviewers-invoice-parser @example-org/cpt-code-reviewers-major-branch
+/src/WindowsApplicationProjects/InvoiceParser/LibraryAssemblies/InvoiceParser.Domain/** @example-org/cpt-code-reviewers-invoice-parser @example-org/cpt-code-reviewers-major-branch
+/src/WindowsApplicationProjects/InvoiceParser/LibraryAssemblies/InvoiceParserLibrary/** @example-org/cpt-code-reviewers-invoice-parser @example-org/cpt-code-reviewers-major-branch
+
+# devops owner
+/.github/** @example-org/cpt-devops @example-org/cpt-code-reviewers-major-branch
+/infrastructure/** @example-org/cpt-devops @example-org/cpt-code-reviewers-major-branch
+/pipeline/** @example-org/cpt-devops @example-org/cpt-code-reviewers-major-branch
+/terraform/** @example-org/cpt-devops @example-org/cpt-code-reviewers-major-branch
+

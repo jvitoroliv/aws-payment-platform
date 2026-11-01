@@ -1,0 +1,93 @@
+#!groovy
+
+properties([
+    [
+        $class: 'DatadogJobProperty',
+        tagProperties: "jenkins.job.duration,jenkins.job.status"
+    ],
+    disableConcurrentBuilds()
+])
+
+node('dev') {
+    def COMPOSE_COMMAND
+    String DOCKER_URL = "https://registry.example.io"
+    String credentialsId = 'jenkins-default-GitHub-Token-example-org'
+
+    stage('Prep') {
+        cleanWs()
+        SCM_CHECKOUT = checkout scm
+
+        env.VERSION = "${env.CHANGE_BRANCH}-${env.BUILD_NUMBER}".replace("#", "-")
+        env.GIT_COMMIT = SCM_CHECKOUT.GIT_COMMIT
+
+        buildName "${env.BUILD_NUMBER}) ${env.CHANGE_BRANCH}"
+        buildDescription "${env.CHANGE_BRANCH} => ${env.CHANGE_TARGET}. \nChange Author: ${env.CHANGE_AUTHOR}"
+
+        COMPOSE_COMMAND = "docker-compose -f docker-compose.yml -f docker-compose.jenkins.yml -p ${env.VERSION}"
+        withDockerRegistry(credentialsId: 'tag-devops-cloud-artifactory-creds', url: DOCKER_URL) {
+            // Pull all images used by Docker Compose while using FINSERV Artifactory creds to bypass the Dockerhub pull limit
+            sh "${COMPOSE_COMMAND} pull"
+            sh "${COMPOSE_COMMAND} up -d builder"
+        }
+    }
+
+    try {
+        ansiColor('xterm') {
+            stage('Download Dependencies') {
+                docker.image("registry.example.com/golang:1.22.0").inside("-v ${env.WORKSPACE}/.mod:/go/pkg/mod -u root") {
+                    withCredentials([gitUsernamePassword(credentialsId: credentialsId, gitToolName: 'Default')]) {
+                        sh 'go mod download'
+                        sh 'go mod vendor'
+                    }
+                }
+            }
+
+            stage('Build Binary') {
+                withDockerRegistry(credentialsId: 'tag-devops-cloud-artifactory-creds', url: DOCKER_URL) {
+                    withCredentials([gitUsernamePassword(credentialsId: credentialsId, gitToolName: 'Default')]) {
+                        sh "${COMPOSE_COMMAND} exec -T builder bash -c 'make compile'"
+                    }
+                }
+            }
+
+            stage('Go Lint') {
+                sh "${COMPOSE_COMMAND} exec -T builder bash -c 'GOBIN=/go/bin make install-linter'"
+                sh "${COMPOSE_COMMAND} exec -T builder bash -c 'make lint'"
+            }
+
+            stage("Docker Compose") {
+                // Use FINSERV Artifactory creds to bypass the Dockerhub pull limit
+                withDockerRegistry(credentialsId: 'tag-devops-cloud-artifactory-creds', url: DOCKER_URL) {
+                    sh "${COMPOSE_COMMAND} up --build -d"
+                }
+            }
+
+            stage('Go Unit Tests') {
+                sh "${COMPOSE_COMMAND} exec -T builder bash -c 'make unit-test'"
+            }
+
+            def tfContainer = docker.image("hashicorp/terraform:1.6.5")
+            stage('Infrastructure Validation') {
+                tfContainer.inside("-e TF_VAR_app_version=${env.VERSION} --entrypoint=''") {
+                    withCredentials([gitUsernamePassword(credentialsId: credentialsId,                            gitToolName: 'Default')]) {
+                        dir("deployments/terraform/root-module") {
+                            sh "terraform init -backend-config=../environments/dev/us-east-1/dev.backend"
+                            sh "terraform plan --var-file=../environments/dev/us-east-1/dev.tfvars"
+                        }
+                    }
+                }
+            }
+        }
+    } catch (Exception e) {
+        currentBuild.result = 'FAILURE'
+        println e.toString()
+    } finally {
+        GString logFile = "${env.VERSION}.log"
+        sh "${COMPOSE_COMMAND} logs > ${logFile}"
+        zip archive: true, glob: "${logFile}", zipFile: "${logFile}.zip"
+
+        sh "${COMPOSE_COMMAND} down"
+        notifyGoogle(currentBuild.result, "Ledger Pull Request")
+    }
+}
+

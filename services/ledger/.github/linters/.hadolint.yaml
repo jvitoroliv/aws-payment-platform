@@ -1,0 +1,4 @@
+# .hadolint.yaml
+# .hadolint configuration
+
+failure-threshold: error

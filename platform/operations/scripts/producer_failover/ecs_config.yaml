@@ -1,0 +1,17 @@
+# ecs_config.yaml — ECS service definitions
+
+# ecs_config.yaml — ECS service definitions
+
+clusters:
+  company:
+    service_name: company-producer
+  ledger:
+    service_name: ledger-producer
+  non-posted-exceptions:
+    service_name: exception-producer
+  company-statements:
+    service_name: company-statements-ecs-service
+  statement-cycle:
+    service_name: statement-cycle-producer
+  unpaid-balances:
+    service_name: unpaid-balances-ecs-service

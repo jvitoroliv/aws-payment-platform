@@ -1,0 +1,61 @@
+#!groovy
+
+properties(
+        [
+                parameters([
+                        string(defaultValue: 'latest', name: 'VERSION'),
+                        string(defaultValue: 'us-east-1', name: 'REGION'),
+                        choice(choices: ["dev", "test"].join("\n"),
+                                description: 'environment',
+                                name: 'ENVIRONMENT')
+                ]),
+                ([
+                        $class       : 'DatadogJobProperty',
+                        tagProperties: "jenkins.job.duration,jenkins.job.status"
+                ])
+        ]
+)
+
+disableConcurrentBuilds()
+
+node("${params.ENVIRONMENT}") {
+    stage('Prep') {
+        buildName "${env.BUILD_NUMBER}) ${params.ENVIRONMENT}"
+        buildDescription "${params.ENVIRONMENT} => ${params.VERSION}\n"
+
+        checkout scm
+
+        env.ENVIRONMENT = params.ENVIRONMENT
+        env.REGION = params.REGION
+        env.VERSION = params.VERSION
+    }
+
+    try {
+        stage ('Plan') {
+            ansiColor('xterm') {
+                docker.image("hashicorp/terraform:1.6.5").inside("-e TF_VAR_mock-service_version=${env.VERSION} --entrypoint='' -u root") {
+                    dir("terraform/environments/${params.ENVIRONMENT}/${params.REGION}") {
+                        sh "terraform init -reconfigure -upgrade"
+                        sh "terraform plan"
+                    }
+                }
+            }
+        }
+        stage('Deploy') {
+            ansiColor('xterm') {
+
+                docker.image("hashicorp/terraform:1.6.5").inside("-e TF_VAR_mock-service_version=${env.VERSION} --entrypoint='' -u root") {
+                    dir("terraform/environments/${params.ENVIRONMENT}/${params.REGION}") {
+                        sh "terraform apply -auto-approve"
+                    }
+                }
+            }
+        }
+
+    } catch (Exception e) {
+        currentBuild.result = 'FAILURE'
+        println e.toString()
+    } finally {
+        notifyGoogle(currentBuild.result, "TAG Test Harness Deploy")
+    }
+}

@@ -1,0 +1,43 @@
+# opslevel.yml — opslevel configuration
+
+# opslevel.yml — opslevel configuration
+
+---
+version: 1
+service:
+  name: CoreService
+  lifecycle: generally-available
+  tier: tier_1
+  product: CorePlatform
+  owner: cpt-code-reviewers-major-branch
+  system:
+  language: javascript, c#,.net
+  framework: asp-net
+  description: CorePlatform is a brandable financial insitution web application that provides corporate card managment via transaction envelopes, automated accounts payable, hiearchy submission and approval, reporting, and more
+  aliases:
+  tags:
+  - key: pci
+    value: true
+  - key: api-type
+    value: rest, other
+  - key: db
+    value: sql-server
+  - key: api-scope
+    value: external
+  - key: containerized
+    value: 'false'
+  - key: scope
+    value: external
+  - key: type
+    value: frontend
+  - key: type
+    value: backend
+  - key: type
+    value: mobile
+  repositories:
+  - name: example-org/CoreService
+    path: "/"
+    provider: github
+  tools:
+  dependencies:
+  alert_sources:

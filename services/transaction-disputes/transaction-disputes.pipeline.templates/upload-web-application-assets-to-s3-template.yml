@@ -1,0 +1,140 @@
+# upload-web-application-assets-to-s3-template.yml — S3 bucket configuration
+
+# upload-web-application-assets-to-s3-template.yml — S3 bucket configuration
+
+parameters:
+- name: WEB_APPLICATION_ASSETS_ARTIFACT_NAME
+  type: string
+- name: AWS_REGION
+  type: string
+- name: S3_BUCKET_NAME
+  type: string
+- name: ENVIRONMENT_NAME
+  type: string
+  values:
+  - test
+  - stage
+  - prod
+- name: AGENT_POOL_NAME
+  type: string
+- name: ADO_ENVIRONMENT_NAME
+  values:
+  - Service-Test-Env
+  - Service-Stage-Env
+  - Service-Prod-Env
+- name: DEPENDENT_JOB_NAME
+  type: string
+- name: JOB_NAME
+  type: string
+- name: PROJECT_APP_SETTINGS_PATH
+  type: string
+
+jobs:
+- deployment: '${{ parameters.JOB_NAME }}'
+  displayName: "Push web application assets to AWS S3 bucket in ${{ parameters.ENVIRONMENT_NAME }} environment"
+  workspace:
+    clean: all
+  variables:
+    buildContainerName: '$(Build.BuildNumber)_build_container'
+    webapplicationassetsFolderName: 'webapplicationassets'
+    webApplicationAssetsCompressedFileName: 'web_application.zip'
+    Application.Environment: ${{ parameters.ENVIRONMENT_NAME }}
+  dependsOn:  ${{ parameters.DEPENDENT_JOB_NAME }}
+  # GitHub Environment — enables deployment protection rules and secrets scoping
+  environment: ${{ parameters.ADO_ENVIRONMENT_NAME }}
+  pool:
+    name: ${{ parameters.AGENT_POOL_NAME }}
+
+  strategy:
+    runOnce:
+      deploy:
+        steps:
+        - checkout: self
+          clean: true
+          displayName: 'Checkout the source repository'
+
+        - task: Docker@0
+          inputs:
+            containerregistrytype: Container Registry
+            action: Run a Docker command
+            customCommand: image build -t $(buildContainerName):$(Build.BuildNumber) --label "$(Build.BuildNumber)" -f payment-service.pipeline.templates/BuildContainer_Dockerfile payment-service.pipeline.templates
+          displayName: Build Docker Image
+          enabled: true
+
+        - task: Docker@0
+          inputs:
+            containerregistrytype: Container Registry
+            action: Run a Docker command
+            customCommand: run --privileged -id --name $(buildContainerName) $(buildContainerName):$(Build.BuildNumber)
+          displayName: Run the container using the Docker Image
+          enabled: true
+
+        - bash: |
+            sleep 30s
+          displayName: Sleep to let Docker service start
+          enabled: true
+
+        - task: DownloadBuildArtifacts@0
+          inputs:
+            buildType: 'current'
+            downloadType: 'single'
+            artifactName: ${{ parameters.WEB_APPLICATION_ASSETS_ARTIFACT_NAME }}
+            downloadPath: '$(System.ArtifactsDirectory)'
+          displayName: Download web application assets
+          enabled: true
+
+        - task: ExtractFiles@1
+          inputs:
+            archiveFilePatterns: '$(System.ArtifactsDirectory)/${{ parameters.WEB_APPLICATION_ASSETS_ARTIFACT_NAME }}/$(webApplicationAssetsCompressedFileName)'
+            destinationFolder: '$(System.ArtifactsDirectory)/${{ parameters.WEB_APPLICATION_ASSETS_ARTIFACT_NAME }}/'
+            cleanDestinationFolder: false
+          displayName: Decompress web application assets
+          enabled: true
+
+        - bash: |
+            rm $(System.ArtifactsDirectory)/${{ parameters.WEB_APPLICATION_ASSETS_ARTIFACT_NAME }}/$(webApplicationAssetsCompressedFileName)
+          displayName: Remove compressed web application assets
+          enabled: true
+
+        # This will use the matching variable above "Application.Environment" to update the same json value in the specified target file(s)
+        - task: FileTransform@1
+          inputs:
+            folderPath: '$(System.ArtifactsDirectory)/${{ parameters.WEB_APPLICATION_ASSETS_ARTIFACT_NAME }}/${{ parameters.PROJECT_APP_SETTINGS_PATH }}'
+            fileType: json
+            targetFiles: appsettings.json
+          displayName: Update Application.Environment in appsettings.json
+          enabled: true
+
+        - task: Docker@0
+          inputs:
+            containerregistrytype: Container Registry
+            action: Run a Docker command
+            customCommand: cp $(System.ArtifactsDirectory)/${{ parameters.WEB_APPLICATION_ASSETS_ARTIFACT_NAME }} $(buildContainerName):/$(webapplicationassetsFolderName)
+          displayName: Copy web application assets into build container
+          enabled: true
+
+        - task: Docker@0
+          inputs:
+            containerregistrytype: Container Registry
+            action: Run a Docker command
+            customCommand:  exec --privileged -w /$(webapplicationassetsFolderName) $(buildContainerName) aws s3 cp ./ s3://${{ parameters.S3_BUCKET_NAME }} --recursive
+          displayName: Push web application assets to AWS S3 bucket
+          enabled: true
+
+        - task: Docker@0
+          condition: always()
+          inputs:
+            containerregistrytype: Container Registry
+            action: Run a Docker command
+            customCommand: stop $(buildContainerName)
+          displayName: Stop build container
+          enabled: true
+
+        - task: Docker@0
+          condition: always()
+          inputs:
+            containerregistrytype: Container Registry
+            action: Run a Docker command
+            customCommand: rm --force $(buildContainerName)
+          displayName: Remove build container
+          enabled: true

@@ -1,0 +1,149 @@
+---
+# A word about variable substitution and notation
+# dot notation will always be interpreted literally
+# bracket notation will allow for substitution when the substitution string is the name of an existing variable
+#
+# e.g.
+# aws.account.subprod will not substitute 'subprod'
+# aws.account["subprod"] will allow for substitution of 'subprod' if subprod is a variable
+#   otherwise it is interpreted literally
+
+# Global Resources
+global:
+  account:
+    sub_prod: &subprod "111111111111"
+    stage: &stage "333333333333"
+    prod: &prod "222222222222"
+  region:
+    primary: "us-east-1"
+    secondary: "us-west-2"
+
+# Tenancy Resources
+tenancy:
+  dev:
+    aws_account_id: *subprod
+    iam:
+      external_id: "00000000000000000000000000000000"
+    us-east-1:
+      vpc_id: "vpc-0example000000001"
+      subnets:
+        private: ["subnet-0example000000001", "subnet-0example000000002", "subnet-0example000000003"]
+      private_route_tables: ["rtb-04bd974784e1b053b", "rtb-09b2b247cac6781b4", "rtb-04df5b72bab942f26"]
+      atlas:
+        peering:
+          us-east-1:
+            cidr: "198.51.100.0/24"
+            connection: "pcx-05dcc09d7af65064c"
+          us-west-2:
+            cidr: "198.51.100.0/24"
+            connection: "pcx-0450d9edc27ab064f"
+    us-west-2:
+      vpc_id: "vpc-0example000000001"
+      subnets:
+        private: ["subnet-0example000000004", "subnet-0example000000005", "subnet-0example000000006"]
+      private_route_tables: ["rtb-05516962d222bb256", "rtb-02c0278d386c9ed74", "rtb-02f063aafc00bc39b"]
+      atlas:
+        peering:
+          us-east-1:
+            cidr: "198.51.100.0/24"
+            connection: "pcx-00a91509c5f130073"
+          us-west-2:
+            cidr: "198.51.100.0/24"
+            connection: "pcx-0b8851a2304016cf3"
+
+  test:
+    aws_account_id: *subprod
+    iam:
+      external_id: "00000000000000000000000000000000"
+    us-east-1:
+      vpc_id: "vpc-0example000000001"
+      subnets:
+        private: ["subnet-0example000000007", "subnet-0example000000008", "subnet-0example000000009"]
+      private_route_tables: ["rtb-0d58790b54ec6aaca", "rtb-0003833c55c0145c1", "rtb-053cccff1b3232806"]
+      atlas:
+        peering:
+          us-east-1:
+            cidr: "198.51.100.0/24"
+            connection: "pcx-0ab7a2b1af663297e"
+          us-west-2:
+            cidr: "198.51.100.0/24"
+            connection: "pcx-0a2f3a1f561d87b9d"
+    us-west-2:
+      vpc_id: "vpc-0example000000001"
+      subnets:
+        private: ["subnet-0example000000010" ,"subnet-0example000000011" ,"subnet-0example000000012"]
+      private_route_tables: ["rtb-01af87202ad80d875", "rtb-024bcf65610e349ce", "rtb-070dcb39f956af243"]
+      atlas:
+        peering:
+          us-east-1:
+            cidr: "198.51.100.0/24"
+            connection: "pcx-0ff44fc803ce4e3fc"
+          us-west-2:
+            cidr: "198.51.100.0/24"
+            connection: "pcx-0586ef5d188aa30af"
+
+  prod:
+    aws_account_id: *prod
+    iam:
+      external_id: "11111111111111111111111111111111"
+    us-east-1:
+      vpc_id: "vpc-0example000000001"
+      subnets:
+        private: ["subnet-0example000000013", "subnet-0example000000014", "subnet-0example000000015"]
+      private_route_tables: ["rtb-07e78320ae9cff92f", "rtb-048a001c1481ccb13", "rtb-073a26466facbee53"]
+      atlas:
+        peering:
+          us-east-1:
+            cidr: "198.51.100.0/24"
+            connection: "pcx-05c9aeb5e58e5bf8d"
+          us-west-2:
+            cidr: "198.51.100.0/24"
+            connection: "pcx-04b91c7325250d4c2"
+    us-west-2:
+      vpc_id: "vpc-0example000000001"
+      subnets:
+        private: ["subnet-0example000000016", "subnet-0example000000017", "subnet-0example000000018"]
+      private_route_tables: ["rtb-04d5e3f82fee64e74", "rtb-0058f1a33dcbd13ce", "rtb-0260f9a2877eacf5e"]
+      atlas:
+        peering:
+          us-east-1:
+            cidr: "198.51.100.0/24"
+            connection: "pcx-0ebd42194960f9088"
+          us-west-2:
+            cidr: "198.51.100.0/24"
+            connection: "pcx-01e88c8b76173b3c3"
+
+  stage:
+    aws_account_id: *stage
+    iam:
+      external_id: "22222222222222222222222222222222"  # External ID for monitoring integration
+    us-east-1:
+      vpc_id: "vpc-0example000000001"
+      subnets:
+        private: ["subnet-0example000000019", "subnet-0example000000020", "subnet-0example000000021"]
+      private_route_tables: ["rtb-0fd3d92c9375941a0", "rtb-07f7f025f9f580a6e", "rtb-02b556ca50bc39fc5"]
+      atlas:
+        peering:
+          us-east-1:
+            cidr: "198.51.100.0/24"
+            connection: "pcx-0365421f97e634c42"
+          us-west-2:
+            cidr: "198.51.100.0/24"
+            connection: "pcx-02723dc2fb22d15af"
+    us-west-2:
+      vpc_id: "vpc-0example000000001"
+      subnets:
+        private: ["subnet-0example000000022", "subnet-0example000000023", "subnet-0example000000024"]
+      private_route_tables: ["rtb-05e28c69a76ac6c63", "rtb-007163bfebc44dd93", "rtb-0138ba2d64818ca4d"]
+      atlas:
+        peering:
+          us-east-1:
+            cidr: "198.51.100.0/24"
+            connection: "pcx-06ca1adc9ec757bc3"
+          us-west-2:
+            cidr: "198.51.100.0/24"
+            connection: "pcx-0f8cb0befdf5ae007"
+
+# Modules
+splunklogger:
+  source_s3_key: "splunk_logger.zip"

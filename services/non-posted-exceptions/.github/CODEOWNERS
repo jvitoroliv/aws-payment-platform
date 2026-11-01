@@ -1,0 +1,10 @@
+* @example-org/tag-leads
+
+# DevOps
+/.github/workflows @example-org/tag-devops-leads @example-org/tag-leads
+/.github/linters/actionlint.yaml @example-org/tag-devops-leads @example-org/tag-leads
+/.github/linters/groovylintrc.json @example-org/tag-devops-leads @example-org/tag-leads
+/deployments/ @example-org/tag-devops-leads @example-org/tag-leads
+docker-compose* @example-org/tag-devops-leads @example-org/tag-leads
+*Dockerfile* @example-org/tag-devops-leads @example-org/tag-leads
+

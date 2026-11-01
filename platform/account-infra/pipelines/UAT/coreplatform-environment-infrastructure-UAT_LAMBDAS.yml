@@ -1,0 +1,101 @@
+# coreplatform-environment-infrastructure-UAT_LAMBDAS.yml
+# Lambda function definitions
+
+name: $(BuildDefinitionName)_$(Date:yyyMMdd)$(rev:.rr)
+
+parameters:
+- name: Environment
+  default: 'UAT_LAMBDAS'
+- name: ApplyTerraform
+  type: boolean
+  default: false
+  displayName: '🔨👷‍♀️ Apply Terraform'
+
+trigger: none
+
+resources:
+  pipelines:
+    - pipeline: LambdaArtifactPipeline
+      source: coreplatform-account-infrastructure-drainqueuetos3
+      #TODO: Uncomment this once the above pipeline has made it to master
+      #branch: master
+
+variables:
+- name: LambdaArtifactName
+  value: LambdaArtifact
+  readonly: true
+- name: LambdaFilename
+  value: DrainQueueToS3.zip
+  readonly: true
+
+stages:
+- stage: Stage_DeployToUAT
+  ${{ if eq(parameters.ApplyTerraform, true) }}:
+    displayName: Deploy to UAT
+  ${{ if eq(parameters.ApplyTerraform, false) }}:
+    displayName: Deploy to UAT - Validate Only
+  jobs:
+    - deployment: DeployToUAT
+      ${{ if eq(parameters.ApplyTerraform, true) }}:
+        displayName: Deploy to UAT
+      ${{ if eq(parameters.ApplyTerraform, false) }}:
+        displayName: Deploy to UAT - Validate Only
+      # GitHub Environment — enables deployment protection rules and secrets scoping
+      environment: enc-uat-env
+      pool: CpAWS-UAT
+      workspace:
+        clean: all
+      strategy:
+        runOnce:
+          deploy:
+            steps:
+              - checkout: self
+                path: Application
+                displayName: Checkout the source repository
+
+              - download: LambdaArtifactPipeline
+                artifact: $(LambdaArtifactName)
+                displayName: Download the lambda artifact
+
+              - powershell: |
+                  dir env:
+                displayName: Display all environment variables
+
+              - script: |
+                  dir /s
+                condition: eq(variables['System.debug'], 'true')
+                displayName: List agent files
+
+              - script: |
+                  dir /s
+                workingDirectory: $(Pipeline.Workspace)/LambdaArtifactPipeline/$(LambdaArtifactName)
+                condition: eq(variables['System.debug'], 'true')
+                displayName: List agent artifact files
+
+              - script: |
+                  copy $(LambdaFilename) $(System.DefaultWorkingDirectory)\env\$(Environment)
+                workingDirectory: $(Pipeline.Workspace)/LambdaArtifactPipeline/$(LambdaArtifactName)
+                displayName: Copy lambda zip file into terraform folder
+
+              # Prefix git urls in tf with the SYSTEM_ACCESSTOKEN
+              - template: ../templates/rewriteTerraformGitUrlsToIncludeToken.yml
+
+              - script: |
+                  terraform init -input=false
+                workingDirectory: '$(System.DefaultWorkingDirectory)\env\$(Environment)'
+                displayName: terraform init
+          
+              - script: |
+                  terraform plan -out terraform.tfplan
+                workingDirectory: '$(System.DefaultWorkingDirectory)\env\$(Environment)'
+                displayName: terraform plan
+
+              - ${{ if eq(parameters.ApplyTerraform, true) }}:
+                - script: |
+                    terraform apply terraform.tfplan
+                  workingDirectory: '$(System.DefaultWorkingDirectory)\env\$(Environment)'
+                  displayName: terraform apply
+              - ${{ if eq(parameters.ApplyTerraform, false) }}:
+                - script: |
+                    echo TERRAFORM NOT APPLIED
+                  displayName: TERRAFORM NOT APPLIED

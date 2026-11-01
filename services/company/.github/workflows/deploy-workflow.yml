@@ -1,0 +1,58 @@
+# deploy-workflow.yml — deployment automation
+
+# deploy-workflow.yml — deployment automation
+
+name: Deploy Company Producer
+run-name: Deploy ${{ inputs.application_version }} to ${{ inputs.environment }} by @${{ github.actor }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Environment to deploy to
+        required: true
+        type: choice
+        default: 'dev'
+        options:
+          - dev
+          - test
+          - stage
+          - prod
+      regions:
+        description: YAML list of region(s) to deploy to
+        required: true
+        type: string
+        default: |
+          - us-east-1
+          - us-west-2
+      application_version:
+        description: Application version to deploy
+        required: true
+        type: string
+      run_migrations:
+        description: Run Flyway migrations
+        required: false
+        type: boolean
+        default: false
+      trigger_deployment:
+        description: Triggers the deployment of the service
+        required: false
+        type: boolean
+        default: true
+
+jobs:
+  deploy:
+    name: Deploy to ${{ inputs.environment }}
+    uses: example-org/shared-actions/.github/workflows/deploy-service.yaml@deploy-service-v1
+    with:
+      services: |
+        - company-producer
+      regions: ${{ inputs.regions }}
+      environment: ${{ inputs.environment }}
+      run_migrations: ${{ inputs.run_migrations }}
+      application_version: ${{ inputs.application_version }}
+      trigger_deployment: ${{ inputs.trigger_deployment }}
+      # db_name: company_producer
+      # db_secret_name: ${{ inputs.environment }}-company-producer-aurora-endpoint
+      # flyway_locations: filesystem:flyway/db/migrations
+    secrets: inherit

@@ -1,0 +1,223 @@
+[
+  {
+    "name": "${job_name}",
+    "command": [
+      "sh",
+      "-c",
+      "exec /mock-service-${job_name} ${flags}"
+    ],
+    "cpu": 0,
+    "dependsOn": [
+      {
+        "containerName": "datadog",
+        "condition": "START"
+      },
+      {
+        "condition": "COMPLETE",
+        "containerName": "crowdstrike-falcon-init-container"
+      }
+    ],
+    "entryPoint": [
+      "/tmp/CrowdStrike/rootfs/lib64/ld-linux-x86-64.so.2",
+      "--library-path",
+      "/tmp/CrowdStrike/rootfs/lib64",
+      "/tmp/CrowdStrike/rootfs/bin/bash",
+      "/tmp/CrowdStrike/rootfs/entrypoint-ecs.sh"
+    ],
+    "environment": [
+      {
+        "name": "DD_ENV",
+        "value": "${environment}"
+      },
+      {
+        "name": "DD_SERVICE",
+        "value": "tag-${job_name}"
+      },
+      {
+        "name": "DD_VERSION",
+        "value": "${mock_version}"
+      },
+      {
+        "name": "FALCONCTL_OPTS",
+        "value": "--cid=${crowdstrike-cid}"
+      },
+      {
+        "name": "DD_TRACE_PARTIAL_FLUSH_ENABLED",
+        "value": "true"
+      },
+      {
+        "name": "OTEL_EXPORTER_OTLP_ENDPOINT",
+        "value": "http://localhost:4317/"
+      }
+    ],
+    "dockerLabels": {
+      "com.datadoghq.tags.env": "${environment}",
+      "com.datadoghq.tags.service": "tag-${job_name}",
+      "com.datadoghq.tags.version": "${mock_version}"
+    },
+    "essential": true,
+    "image": "${job_image}",
+    "linuxParameters": {
+      "capabilities": {
+        "add": [
+          "SYS_PTRACE"
+        ],
+        "drop": []
+      }
+    },
+    "logConfiguration": {
+      "logDriver": "awslogs",
+      "options": {
+        "awslogs-group": "${aws_logs_group}",
+        "awslogs-region": "${region}",
+        "awslogs-stream-prefix": "fargate"
+      }
+    },
+    "mountPoints": [
+      {
+        "containerPath": "/tmp/CrowdStrike",
+        "readOnly": true,
+        "sourceVolume": "crowdstrike-falcon-volume"
+      },
+      {
+        "containerPath": "/tmp/CrowdStrike-private",
+        "readOnly": false,
+        "sourceVolume": "crowdstrike-private-${job_name}"
+      }
+    ],
+    "portMappings": [
+      {
+        "protocol": "tcp",
+        "containerPort": 1025,
+        "hostPort": 1025
+      }
+    ],
+    "repositoryCredentials": {
+      "credentialsParameter": "${artifactory_secret_arn}"
+    },
+    "systemControls": [],
+    "volumesFrom": [
+    ]
+  },
+  {
+    "name": "datadog",
+    "cpu": 0,
+    "environment": [
+      {
+        "name": "ECS_FARGATE",
+        "value": "true"
+      },
+      {
+        "name": "ENVIRONMENT",
+        "value": "${environment}"
+      },
+      {
+        "name": "environment",
+        "value": "${environment}"
+      },
+      {
+        "name": "DD_DOGSTATSD_NON_LOCAL_TRAFFIC",
+        "value": "true"
+      },
+      {
+        "name": "DD_DOGSTATSD_TAGS",
+        "value": "[\"environment:${environment}\", \"fargate:true\"]"
+      },
+      {
+        "name": "DD_TAGS",
+        "value": "environment:${environment} fargate:true"
+      },
+      {
+        "name": "DD_API_KEY",
+        "value": "${dd_api_key}"
+      },
+      {
+        "name": "DD_DOGSTATSD_TAG_CARDINALITY",
+        "value": "${tag_cardinality}"
+      },
+      {
+        "name": "DD_OTLP_CONFIG_RECEIVER_PROTOCOLS_GRPC_ENDPOINT",
+        "value": "0.0.0.0:4317"
+      }
+    ],
+    "dockerLabels": {
+      "com.datadoghq.tags.env": "${environment}",
+      "com.datadoghq.tags.service": "tag-${job_name}",
+      "com.datadoghq.tags.version": "${mock_version}"
+    },
+    "essential": true,
+    "image": "${datadog_image}",
+    "linuxParameters": {
+    },
+    "logConfiguration": {
+      "logDriver": "awslogs",
+      "options": {
+        "awslogs-group": "${datadog_logs_group}",
+        "awslogs-region": "${region}",
+        "awslogs-stream-prefix": "fargate"
+      }
+    },
+    "mountPoints": [],
+    "portMappings": [
+      {
+        "protocol": "udp",
+        "containerPort": 8125,
+        "hostPort": 8125
+      },
+      {
+        "protocol": "tcp",
+        "containerPort": 8126,
+        "hostPort": 8126
+      },
+      {
+        "protocol": "tcp",
+        "containerPort": 4317,
+        "hostPort": 4317
+      }
+    ],
+    "repositoryCredentials": {
+      "credentialsParameter": "${artifactory_secret_arn}"
+    },
+    "systemControls": [],
+    "volumesFrom": []
+  },
+  {
+    "name": "crowdstrike-falcon-init-container",
+    "cpu": 0,
+    "entryPoint": [
+      "/bin/bash",
+      "-c",
+      "chmod u+rwx /tmp/CrowdStrike && mkdir /tmp/CrowdStrike/rootfs && cp -r /bin /etc /lib64 /usr /entrypoint-ecs.sh /tmp/CrowdStrike/rootfs && chmod -R a=rX /tmp/CrowdStrike && chmod -R a=rwX /tmp/CrowdStrike-private-${job_name} && chmod -R a=rwX /tmp/CrowdStrike-private-datadog"
+    ],
+    "environment": [],
+    "essential": false,
+    "image": "registry.example.io/crowdstrike-docker-prod-federated-us/falcon-container-sensor:${crowdstrike_sensor_version}",
+    "logConfiguration": {
+      "logDriver": "awslogs",
+      "options": {
+        "awslogs-group": "${crowdstrike_logs_group}",
+        "awslogs-region": "${region}",
+        "awslogs-stream-prefix": "fargate"
+      }
+    },
+    "mountPoints": [
+      {
+        "containerPath": "/tmp/CrowdStrike",
+        "readOnly": false,
+        "sourceVolume": "crowdstrike-falcon-volume"
+      },
+      {
+        "containerPath": "/tmp/CrowdStrike-private-${job_name}",
+        "readOnly": false,
+        "sourceVolume": "crowdstrike-private-${job_name}"
+      }
+    ],
+    "portMappings": [],
+    "repositoryCredentials": {
+      "credentialsParameter": "${artifactory_secret_arn}"
+    },
+    "systemControls": [],
+    "user": "0:0",
+    "volumesFrom": []
+  }
+]

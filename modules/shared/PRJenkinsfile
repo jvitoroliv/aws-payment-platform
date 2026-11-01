@@ -1,0 +1,72 @@
+#!groovy
+
+properties([
+  [
+    $class: 'DatadogJobProperty',
+    tagProperties: "jenkins.job.duration,jenkins.job.status"
+  ]
+])
+
+node('dev') {
+	ansiColor('xterm') {
+		try {
+			stage('Prep') {
+				cleanWs()
+				buildName "${env.BUILD_NUMBER}) ${env.CHANGE_BRANCH}"
+				buildDescription "${env.CHANGE_BRANCH} => ${env.CHANGE_TARGET}. \nChange Author: ${env.CHANGE_AUTHOR}"
+				//this needs to be all lowercase
+				checkout scm
+				env.AWS_DEFAULT_REGION = "us-east-1"
+				env.ENVIRONMENT = 'dev'
+				env.HOME = "${env.WORKSPACE}"
+				env.GOPATH = "${env.WORKSPACE}/go"
+			}
+
+			def tfContainer = docker.image("registry.example.com/hashicorp/terraform:1.6.5")
+
+			def tagtfContainer = docker.image("registry.example.com/tag-docker-prod-federated-us/tag/tag-utilities/tag-terraform:1.6.5")
+
+			def stages = [:]
+			stages['Plan'] = {
+				tfContainer.pull()
+				tfContainer.inside("-e TF_VAR_environment=${env.ENVIRONMENT} --entrypoint=''") {
+
+					stage("Plan Shared") {
+						echo "US EAST"
+						dir("terraform") {
+							sh "terraform init -reconfigure -backend-config=../environments/${env.ENVIRONMENT}/us-east-1/${env.ENVIRONMENT}.backend"
+							sh "terraform plan --var-file=../environments/${env.ENVIRONMENT}/us-east-1/${env.ENVIRONMENT}.tfvars -lock=false"
+						}
+
+						echo "US WEST"
+						dir("terraform") {
+							sh "terraform init -reconfigure -backend-config=../environments/${env.ENVIRONMENT}/us-west-2/${env.ENVIRONMENT}.backend"
+							sh "terraform plan  --var-file=../environments/${env.ENVIRONMENT}/us-west-2/${env.ENVIRONMENT}.tfvars -lock=false"
+						}
+					}
+				}
+			}
+			stages['Pre-Commit Hooks'] = {
+				tagtfContainer.pull()
+				tagtfContainer.inside("--entrypoint=''") {
+					stage('Pre-Commit Hooks') {
+						dir("") {
+							// Skip the hooks that require Docker
+							sh "SKIP=splunk-logger-s3-tests,splunk-dashboard-update pre-commit run -v --all-files"
+						}
+					}
+				}
+				// Run the hooks that require Docker outside of the TAG TF container
+				sh "bash -c 'cd modules/splunk-logger-s3/function && docker build -t shared-terraform/splunk-logger-s3-tests -f Dockerfile.test . && docker run --rm shared-terraform/splunk-logger-s3-tests'"
+				sh "bash -c 'cd utils/update-splunk-cidrs && ./update-splunk-cidrs.sh'"
+			}
+			parallel(stages)
+
+		} catch (Exception e) {
+			currentBuild.result = 'FAILURE'
+			println e.toString()
+		} finally {
+			notifyGoogle(currentBuild.result, "Terraform-Shared Pull Request Build")
+		}
+	}
+}

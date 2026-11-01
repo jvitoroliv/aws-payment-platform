@@ -1,0 +1,35 @@
+# opslevel.yml — opslevel configuration
+
+# opslevel.yml — opslevel configuration
+
+---
+version: 1
+service:
+  name: shared-actions
+  lifecycle: pre-alpha
+  tier: tier_4
+  product: TAG
+  owner: tag
+  language: yaml
+  framework: other
+  description: Tag DevOps Shared Github actions and workflows
+  aliases:
+    - example-org/shared-actions
+  repositories:
+    - name: example-org/shared-actions
+      path: "/"
+      provider: github
+  tools:
+    - name: DeepSource
+      category: code
+      url: https://app.deepsource.com/gh/example-org/shared-actions
+  dependencies: []
+  tags:
+    - key: pci
+      value: no
+    - key: type
+      value: backend
+    - key: containerized
+      value: yes
+    - key: scope
+      value: internal

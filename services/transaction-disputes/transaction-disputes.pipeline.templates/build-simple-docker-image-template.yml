@@ -1,0 +1,80 @@
+# build-simple-docker-image-template.yml
+# build pipeline
+# Maintained by: Platform Engineering
+
+# build-simple-docker-image-template.yml — build pipeline
+
+parameters:
+  - name: JOB_NAME
+    type: string
+  - name: PROJECT_PATH
+    type: string
+  - name: DOCKERFILE_PATH
+    type: string
+  - name: DOCKER_IMAGE_NAME
+    type: string
+  - name: DOCKER_IMAGE_TAG
+    type: string
+  - name: CONTAINER_ARTIFACT_NAME
+    type: string
+  - name: AGENT_POOL_NAME
+    type: string
+
+jobs:
+  - job: '${{ parameters.JOB_NAME }}'
+    displayName: "Build application docker image"
+    workspace:
+      clean: all
+    variables:
+      dockerExportFileName: 'image.tar'
+      dockerCompressedFileName: 'image.tar.gz'
+    pool:
+      name:  ${{ parameters.AGENT_POOL_NAME }}
+
+    steps:
+      - checkout: self
+        clean: true
+        displayName: 'Checkout the source repository'
+
+      - task: Docker@0
+        inputs:
+          containerregistrytype: Container Registry
+          action: Run a Docker command
+          customCommand: image build -t ${{ parameters.DOCKER_IMAGE_NAME }}:${{ parameters.DOCKER_IMAGE_TAG }} -f $(System.DefaultWorkingDirectory)/${{ parameters.PROJECT_PATH }}/${{ parameters.DOCKERFILE_PATH }} --label "$(Build.BuildNumber)" ${{ parameters.PROJECT_PATH }}
+        displayName: Build Docker image
+        enabled: true
+
+      - task: Docker@0
+        inputs:
+          containerregistrytype: Container Registry
+          action: Run a Docker command
+          customCommand: image save -o $(System.DefaultWorkingDirectory)/${{ parameters.PROJECT_PATH }}/$(dockerExportFileName) ${{ parameters.DOCKER_IMAGE_NAME }}:${{ parameters.DOCKER_IMAGE_TAG }}
+        displayName: Export Docker image to file
+        enabled: true
+
+      - task: ArchiveFiles@1
+        inputs:
+          rootFolder: $(System.DefaultWorkingDirectory)/${{ parameters.PROJECT_PATH }}/$(dockerExportFileName)
+          includeRootFolder: false
+          tarCompression: 'gz'
+          archiveType: tar
+          archiveFile: $(System.DefaultWorkingDirectory)/${{ parameters.PROJECT_PATH }}/$(dockerCompressedFileName)
+        displayName: Compress Docker image file
+        enabled: true
+
+      - bash: |
+          rm $(System.DefaultWorkingDirectory)/${{ parameters.PROJECT_PATH }}/$(dockerExportFileName)
+        displayName: Remove uncompressed Docker image file
+        enabled: true
+
+      - task: PublishBuildArtifacts@1
+        inputs:
+          PathtoPublish: '$(System.DefaultWorkingDirectory)/${{ parameters.PROJECT_PATH }}/$(dockerCompressedFileName)'
+          ArtifactName: '${{ parameters.CONTAINER_ARTIFACT_NAME }}'
+        displayName: Publish Docker image file
+        enabled: true
+
+      - bash: |
+          rm $(System.DefaultWorkingDirectory)/${{ parameters.PROJECT_PATH }}/$(dockerCompressedFileName)
+        displayName: Remove compressed Docker image file
+        enabled: true

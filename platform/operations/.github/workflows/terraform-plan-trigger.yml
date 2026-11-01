@@ -1,0 +1,72 @@
+# terraform-plan-trigger.yml
+# terraform-plan-trigger configuration
+
+name: Terraform Plan Manual Execution
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment to run terraform plan for"
+        required: true
+        default: "all_environments"
+        type: choice
+        options:
+          - "all_environments"
+          - "dev"
+          - "test"
+          - "stage"
+          - "prod"
+      region:
+        description: "Region to run terraform plan for"
+        required: true
+        default: "all_regions"
+        type: choice
+        options:
+          - "all_regions"
+          - "us-east-1"
+          - "us-west-2"
+      terraform_variables:
+        description: "List of Terraform variables to pass as -var options (format: name=value\\nname2=value2)"
+        required: false
+        default: ""
+        type: string
+      app_version_dev:
+        description: "App version for dev environment"
+        required: false
+        default: ""
+        type: string
+      app_version_test:
+        description: "App version for test environment"
+        required: false
+        default: ""
+        type: string
+      app_version_stage:
+        description: "App version for stage environment"
+        required: false
+        default: ""
+        type: string
+      app_version_prod:
+        description: "App version for prod environment"
+        required: false
+        default: ""
+        type: string
+
+jobs:
+  call-terraform-plan-auto-and-trigger:
+    name: Execute Terraform Plan
+    uses: example-org/shared-actions/.github/workflows/terraform-plan-auto-and-trigger.yaml@terraform-plan-auto-and-trigger-v1.0.0-pre.52
+    with:
+      environment: ${{ inputs.environment }}
+      region: ${{ inputs.region }}
+      us_east_1_backend_config_path: "../environments/${{ inputs.environment }}/us-east-1/${{ inputs.environment }}.backend"
+      us_east_1_var_file_path: "../environments/${{ inputs.environment }}/us-east-1/${{ inputs.environment }}.tfvars"
+      us_west_2_backend_config_path: "../environments/${{ inputs.environment }}/us-west-2/${{ inputs.environment }}.backend"
+      us_west_2_var_file_path: "../environments/${{ inputs.environment }}/us-west-2/${{ inputs.environment }}.tfvars"
+      working_directory: "./terraform/tag_core"
+      terraform_variables: ${{ inputs.terraform_variables }}
+      app_version_dev: ${{ inputs.app_version_dev }}
+      app_version_test: ${{ inputs.app_version_test }}
+      app_version_stage: ${{ inputs.app_version_stage }}
+      app_version_prod: ${{ inputs.app_version_prod }}
+    secrets: inherit

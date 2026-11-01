@@ -1,0 +1,66 @@
+# docker-compose.yml — local development environment
+
+# docker-compose.yml — local development environment
+
+version: '3.8'
+
+services:
+  test-harness:
+    build:
+      context: .
+      dockerfile: Dockerfile.test_harness
+    image: registry.example.io/docker-nonprod/app/ps-tag-test-harness:${VERSION:-latest}
+    container_name: ps-tag-test-harness
+    # GitHub Environment — enables deployment protection rules and secrets scoping
+    environment:
+      - VERSION=${VERSION:-latest}
+    volumes:
+      - .:/workspace
+    working_dir: /workspace
+    command: ["/bin/sh", "-c", "make test"]
+
+  mock-chronos:
+    build:
+      context: .
+      dockerfile: Dockerfile.mock_chronos
+    image: registry.example.io/docker-nonprod/app/ps-tag-mock-chronos:${VERSION:-latest}
+    container_name: ps-tag-mock-chronos
+    environment:
+      - VERSION=${VERSION:-latest}
+    ports:
+      - "8080:8080"
+
+  mock-coreplatform:
+    build:
+      context: .
+      dockerfile: Dockerfile.mock_coreplatform
+    image: registry.example.io/docker-nonprod/app/ps-tag-mock-coreplatform:${VERSION:-latest}
+    container_name: ps-tag-mock-coreplatform
+    environment:
+      - VERSION=${VERSION:-latest}
+    ports:
+      - "8081:8080"
+
+  builder:
+    build:
+      context: .
+      dockerfile: docker/builder/Dockerfile
+    image: registry.example.io/docker-nonprod/app/ps-tag-builder:${VERSION:-latest}
+    container_name: ps-tag-builder
+    environment:
+      - VERSION=${VERSION:-latest}
+    volumes:
+      - .:/code
+    working_dir: /code
+
+  web-build:
+    build:
+      context: .
+      dockerfile: Dockerfile.web_build
+    image: registry.example.io/docker-nonprod/app/ps-tag-web-build:${VERSION:-latest}
+    container_name: ps-tag-web-build
+    environment:
+      - VERSION=${VERSION:-latest}
+    volumes:
+      - .:/workspace
+    working_dir: /app

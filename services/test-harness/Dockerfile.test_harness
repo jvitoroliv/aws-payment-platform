@@ -1,0 +1,13 @@
+FROM registry.example.com/alpine
+
+RUN mkdir -p /usr/local/share/ca-certificates
+COPY caadmin.proxy.example.com.pem /usr/local/share/ca-certificates/proxy-ca.crt
+RUN cat /usr/local/share/ca-certificates/proxy-ca.crt >> /etc/ssl/certs/ca-certificates.crt
+RUN apk update && apk add tzdata curl ca-certificates && rm -rf /var/cache/apk/*
+
+COPY test-harness /application
+COPY out/web /web
+COPY docker/run_application.sh /
+COPY docker/crontab /etc/crontabs/root
+
+CMD "/run_application.sh"

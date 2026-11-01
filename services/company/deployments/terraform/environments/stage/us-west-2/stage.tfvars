@@ -1,0 +1,15 @@
+aiven_project                = "stage"
+aiven_user                   = "tag_stage_company"
+autoscaling_max_capacity     = 0
+autoscaling_min_capacity     = 0
+aws_vpc_id                   = "vpc-0example000000001"
+environment                  = "stage"
+region                       = "us-west-2"
+task_definition_cpu          = 2048
+task_definition_memory       = 4096
+topic_cleanup_policy         = "compact,delete"
+topic_partition              = 4
+topic_replication            = 2
+topic_retention_time         = "63113904000" #2 years in milliseconds
+topic_termination_protection = true
+topic_title                  = "issuing.account-management.company"

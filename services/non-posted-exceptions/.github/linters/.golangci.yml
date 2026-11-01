@@ -1,0 +1,53 @@
+# .golangci.yml
+# .golangci configuration
+
+version: "2"
+run:
+  modules-download-mode: vendor
+  timeout: 5m
+linters:
+  enable:
+    - gosec
+    - unconvert
+    - gocyclo
+    - goconst
+    - gocritic
+    - staticcheck
+  settings:
+    gocyclo:
+      min-complexity: 15
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - dupl
+          - errcheck
+          - goconst
+          - gosec
+        path: _test\.go
+      - linters:
+          - errcheck
+        path: tests/*
+      - linters:
+          - staticcheck
+        severity: warning
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+severity:
+  default: error
+formatters:
+  enable:
+    - goimports
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

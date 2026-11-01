@@ -1,0 +1,32 @@
+# opslevel.yml
+# opslevel configuration
+
+---
+version: 1
+service:
+  name: TAG Log Service
+  lifecycle: generally-available
+  tier: tier_3
+  product: TAG
+  owner: tag
+  system: tag
+  language: golang
+  framework: other
+  description: TAG custom wrapper for logging
+  aliases: 
+    - example-org/ps-tag-log
+  tags:
+    - key: pci
+      value: yes
+    - key: type
+      value: backend
+    - key: containerized
+      value: no
+    - key: scope
+      value: internal
+  repositories:
+  - name: example-org/ps-tag-log
+    path: "/"
+    provider: github
+  tools: []
+  dependencies: []

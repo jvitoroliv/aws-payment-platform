@@ -1,0 +1,124 @@
+{
+  "run": {
+    "tests": true
+  },
+  "linters-settings": {
+    "govet": {
+      "disable": [
+        "composites"
+      ]
+    }
+  },
+  "linters": {
+    "enable": [
+      "unconvert",
+      "goimports",
+      "gosec"
+    ],
+    "disable": [
+      "unused",
+      "errcheck"
+    ]
+  },
+  "issues": {
+    "max-same-issues": 0,
+    "max-issues-per-linter": 0,
+    "exclude-rules": [
+      {
+        "linters": [
+          "staticcheck"
+        ],
+        "text": "SA9004:"
+      },
+      {
+        "linters": [
+          "staticcheck"
+        ],
+        "text": "SA5001:"
+      },
+      {
+        "linters": [
+          "staticcheck"
+        ],
+        "text": "SA5011:"
+      }, {
+        "linters": [
+          "staticcheck"
+        ],
+        "text": "SA1019:"
+      }, {
+        "linters": [
+          "gosec"
+        ],
+        "text": "G203:"
+      },{
+        "linters": [
+          "gosec"
+        ],
+        "text": "G101:"
+      },{
+        "linters": [
+          "gosec"
+        ],
+        "text": "G102:"
+      },{
+        "linters": [
+          "gosec"
+        ],
+        "text": "G106:"
+      },{
+        "linters": [
+          "gosec"
+        ],
+        "text": "401:"
+      },{
+        "linters": [
+          "gosec"
+        ],
+        "text": "402:"
+      },{
+        "linters": [
+          "gosec"
+        ],
+        "text": "404:"
+      },{
+        "linters": [
+          "gosec"
+        ],
+        "text": "502:"
+      },{
+        "linters": [
+          "gosec"
+        ],
+        "text": "G114:"
+      },{
+        "linters": [
+          "gosimple"
+        ],
+        "text": "S1011:"
+      },
+      {
+        "linters": [
+          "govet"
+        ],
+        "text": "copylocks:"
+      },{
+        "linters": [
+          "ineffassign"
+        ],
+        "text": "ineffectual assignment to err"
+      },
+      {
+        "linters": [
+          "staticcheck"
+        ],
+        "text": "SA4006:"
+      },{
+        "linters": [
+          "staticcheck"
+        ],
+        "text": "SA4017:"
+      }
+    ]
+  }
+}

@@ -1,0 +1,58 @@
+# docker-compose.override.yml
+# local development environment
+
+services:
+  postgres-database:
+    volumes:
+      - postgresdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  tests:
+    image: card-service-tests:${VERSION:-local}
+    build:
+      context: .
+      dockerfile: test/Dockerfile
+      args:
+        GITHUB_USERNAME: ${GITHUB_USERNAME-}
+        GITHUB_AUTH_TOKEN: ${GITHUB_AUTH_TOKEN-}
+    depends_on:
+      postgres-database:
+        condition: service_healthy
+    entrypoint: /bin/bash
+    profiles:
+      - tests
+    # GitHub Environment — enables deployment protection rules and secrets scoping
+    environment:
+        - ENVIRONMENT=docker
+    volumes:
+      - ./:/app
+
+  test-card-consumer:
+    image: test-card-consumer:${VERSION:-local}
+    build:
+      context: .
+      dockerfile: test/kafka/Dockerfile
+    environment:
+      SCHEMA_REGISTRY_URL: http://karapace-registry:7878
+      BROKER_URL: kafka:27777
+      TOPIC_NAME: "company.issuing.processing.card"
+    command: ["python", "simple_consumer.py"]
+    profiles:
+      - test-kafka-producer
+
+  test-datadog-agent:
+    image: gcr.io/datadoghq/agent:7
+    environment:
+      DD_API_KEY: ${DD_API_KEY}
+      DD_HOSTNAME: service-consumer-local-testing
+      DD_ENV: local
+      DD_OTLP_CONFIG_RECEIVER_PROTOCOLS_GRPC_ENDPOINT: datadog-agent:4317
+      DD_OTLP_CONFIG_RECEIVER_PROTOCOLS_HTTP_ENDPOINT: datadog-agent:4318
+    expose:
+      - "4317"
+      - "4318"
+
+volumes:
+  postgresdata:
+    driver: local

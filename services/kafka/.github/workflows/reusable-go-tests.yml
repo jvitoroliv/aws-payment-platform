@@ -1,0 +1,30 @@
+# reusable-go-tests.yml
+# reusable-go-tests configuration
+
+name: Go Tests Reusable
+
+on:
+  workflow_call:
+
+jobs:
+  test:
+    name: 'Go Tests'
+    runs-on: team-dev
+
+    container:
+      image: registry.example.com/golang:1.19.2
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Prep
+        run: |
+          go install github.com/actgardner/gogen-avro/v10/cmd/...@latest
+          go generate
+
+      - name: Go Tests
+        run: |
+          go test ./producer
+
+          echo "Tests succeeded" | tee $GITHUB_STEP_SUMMARY

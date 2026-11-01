@@ -1,0 +1,75 @@
+# DBSchemaSync.yaml
+# DBSchemaSync configuration
+
+trigger:
+  branches:
+    include:
+    - Major
+  paths:
+    include:
+    - /src/Database
+    - /src/DataAccessProjects/Aoc.CorePlatform.LinqToSql
+    exclude:
+    - /src/Database/Scripts/CoreService/PreSchema
+    - /src/Database/Scripts/CoreService/dacpac
+    - /src/Database/Scripts/CorePlatform_Archive/dacpac
+    - /src/Database/Scripts/TaskManagement/dacpac
+
+variables:
+- group: coreplatform-github
+- name: time_stamp
+  value: $(Get-Date -format yyyMMdd-Hmmss)
+
+jobs:
+- job: DBSchema_Sync_Job
+  displayName: DBSchema Sync Job
+  timeoutInMinutes: 60
+  pool:
+    name: CoreService-Sync
+    demands: msbuild
+  workspace:
+    clean: all
+  steps:
+  - checkout: self
+    clean: true
+    persistCredentials: true
+
+  - task: MSBuild@1
+    displayName: Build solution DBSchemaSync_Redirector.proj
+    inputs:
+      solution: DBSchemaSync_Redirector.proj
+      msbuildVersion: 17.0
+      platform: Any CPU
+      configuration: Release
+      msbuildArguments: /p:NewRootDir="$(Build.SourcesDirectory)"
+
+  - powershell: 'git pull origin Major'
+    displayName: Git Pull
+    
+  - powershell: 'git checkout -b dbschemasync/ENC-DBSchemaSync-$(time_stamp)'
+    displayName: Git Checkout New Branch for ENC-DBSchemaSync
+
+  - powershell: 'git add $(Build.SourcesDirectory)\src\Database\Scripts\CoreService\PreSchema'
+    displayName: Git Add Preschema Files 
+    
+  - powershell: 'git add $(Build.SourcesDirectory)\src\Database\Scripts\CoreService\dacpac'
+    displayName: Git Add CorePlatform Dacpac Files
+
+  - powershell: 'git add $(Build.SourcesDirectory)\src\Database\Scripts\TaskManagement\dacpac'
+    displayName: Git Add Taskman Dacpac Files
+    
+  - powershell: 'git add $(Build.SourcesDirectory)\src\Database\Scripts\CorePlatform_Archive\dacpac'
+    displayName: Git Add CorePlatform Archive Dacpac Files
+    
+  - powershell: 'git add $(Build.SourcesDirectory)\src\DataAccessProjects\Aoc.CorePlatform.LinqToSql'
+    displayName: Git Add CorePlatform LinqToSql Files
+
+  - powershell: 'git add $(Build.SourcesDirectory)\src\DataAccessProjects\Aoc.Archive.LinqToSql'
+    displayName: Git Add Archive LinqToSql Files
+    
+  - powershell: 'git commit -m "PreSchema, DACPAC, and Linq2SQL Update"'
+    displayName: Git Commit PreSchema, DACPAC, and Linq2SQL Files
+    ignoreLASTEXITCODE: true
+     
+  - powershell: 'git push origin HEAD:dbschemasync/ENC-DBSchemaSync-$(time_stamp) --force'
+    displayName: Git Push

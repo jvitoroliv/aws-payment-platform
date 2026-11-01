@@ -1,0 +1,13 @@
+aiven_project                = "dev"
+aiven_user                   = "tag_test_non_posted_exceptions"
+autoscaling_max_capacity     = 0
+autoscaling_min_capacity     = 0
+aws_vpc_id                   = "vpc-0example000000001"
+environment                  = "test"
+region                       = "us-west-2"
+topic_cleanup_policy         = "delete"
+topic_partition              = 1
+topic_replication            = 2
+topic_retention_time         = "604800000" # 7 days in milliseconds
+topic_termination_protection = false
+topic_title                  = "company.issuing.processing.NonPostedException"

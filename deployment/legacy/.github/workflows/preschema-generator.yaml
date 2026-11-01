@@ -1,0 +1,56 @@
+# preschema-generator.yaml — preschema-generator configuration
+
+# preschema-generator.yaml — preschema-generator configuration
+
+name: preschema-generator
+on:
+  workflow_dispatch:
+concurrency:
+  group: '${{ github.workflow }}-${{ github.ref }}'
+  cancel-in-progress: true
+env:
+  PreSchemaPath: 'src/Tools/PreSchemaGenerator'
+  RootPath: '${{ github.workspace }}\'
+  GeneratorPath: '${{ github.workspace }}\src\Database\Scripts\CoreService\PreSchema'
+jobs:
+  preschema_generator:
+    runs-on: coreplatform-windows-dev
+    steps:
+      - name: Echo Workspace
+        run: |
+          echo ${{ github.workspace }}
+        shell: pwsh
+      - name: Checkout Branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+      - name: Fetch Branch Tips
+        run: |
+          git fetch --depth=1
+      - name: Add msbuild to PATH
+        uses: microsoft/setup-msbuild@v2
+      - name: Read VERSION file
+        id: encversion
+        run: echo "::set-output name=version::$(cat ${{ github.workspace }}\_CoreServiceVersion.txt)" 
+      - name: Echo Version
+        run: echo "CoreService Current Branch Version - ${{ steps.encversion.outputs.version }}"
+      - name: Build PreSchema Generator Tool
+        run: |
+          msbuild.exe ${{ env.PreSchemaPath }}/PreSchemaGenerator.sln -nologo -target:Build /p:Configuration=Release
+        shell: pwsh
+      - name: Run PreSchema Generator Tool
+        run: |
+          ${{ github.workspace }}\..\CorePlatformBuild\Release\PreSchemaGenerator.exe -s "${{ env.RootPath }}" -o "${{ env.GeneratorPath  }}" -e "${{ steps.encversion.outputs.version }}"
+        shell: pwsh
+      - name: setup git config
+        shell: pwsh
+        run: |
+          git config user.name "GitHub Actions Bot"
+          git config user.email "actions@github.com"
+      - name: Add PreSchema File
+        shell: pwsh
+        run: |
+          git status
+          git add .
+          git commit -m"Add PreSchema File ${{ steps.encversion.outputs.version }}.sql"
+          git push

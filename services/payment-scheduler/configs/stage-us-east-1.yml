@@ -1,0 +1,27 @@
+# stage-us-east-1.yml
+# stage-us-east-1 configuration
+
+# GitHub Environment — enables deployment protection rules and secrets scoping
+environment: stage
+awsRegion: us-east-1
+scheduler:
+  cron: "0/5 * * * *"
+processor:
+  postPaymentTimeout: 3
+  postPaymentMaxRetries: 3
+  maxConsecutiveFailures: 3
+mongo:
+  dbName: payment_scheduler
+  username: "payments"
+  password: "{SECRET:stage_payments_mongo_pw}"
+  uri: mongodb+srv://cluster-stage.example.mongodb.net/test?retryWrites=true&w=2
+server:
+  addr: ":8001"
+  ginMode: "release"
+  timeout: 10
+tagCore:
+  baseURL: "https://api.internal.stage.platform.example.com"
+  timeout: 3
+  maxRetries: 3
+  username: PaymentSchedulerUser
+  password: "{SECRET:stage_payments_tag_core_pw}"

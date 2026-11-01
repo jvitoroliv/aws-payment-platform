@@ -1,0 +1,9 @@
+SHELL=/bin/sh
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+0 14 * * 1  curl -G http://localhost:6660/true/cycle-six
+0 14 * * 2  curl -G http://localhost:6660/true/cycle-six
+0 14 * * 3  curl -G http://localhost:6660/true/cycle-six
+0 14 * * 4  curl -G http://localhost:6660/true/cycle-six
+0 14 * * 5  curl -G http://localhost:6660/true/cycle-six
+0 14 * * 6  curl -G http://localhost:6660/true/cycle-six
+0 14 * * 7  curl -G http://localhost:6660/true/cycle-six

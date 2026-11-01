@@ -1,0 +1,26 @@
+# opslevel-schema.yml
+# opslevel-schema configuration
+
+---
+name: OpsLevel Schema Validator
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "**/opslevel.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "**/opslevel.yml"
+
+jobs:
+  validate-opslevel-schema:
+    name: validate-opslevel-schema
+    runs-on: [self-hosted, tag-dev]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate OpsLevel Schema
+        uses: example-org/shared-actions/opslevel/validate-schema@v1

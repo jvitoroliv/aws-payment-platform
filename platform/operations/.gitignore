@@ -1,0 +1,33 @@
+#  Local .terraform directories
+**/.terraform/*
+
+# .tfvars files
+**/plan/*
+**/planfile
+**/*.tfstate
+**/*.lock.hcl
+
+#ignore our sensative decrypted paramStore.tf and key
+paramStore.tf
+plaintext_key_decoded.txt
+*Full.tfvars
+
+#ignore local editor config
+*.iml
+/.idea
+
+#ignore our builds of the tagctl lambda
+tagctl/cmd/lambda/out
+
+#ignore our dt builds
+dt/dt
+
+#ignore OS files
+**/.DS_Store
+
+lib/
+
+src
+
+# python
+__pycache__

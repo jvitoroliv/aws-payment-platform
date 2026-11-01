@@ -1,0 +1,148 @@
+#!/usr/bin/env bash
+# shellcheck disable=SC2317
+# shellcheck disable=SC2068
+# shellcheck disable=SC2102
+set -euo pipefail
+export DEBUG=0
+
+.HELP:() { if [ "$DEBUG" -eq 0 ]; then return; else echo "$@"; fi; }
+
+help() { grep -E '(\s|^)+.HELP:\ ' "$0" | sed -e 's/.HELP: //' | sed -e 's/"//g' ; return 0; }
+
+# A note about help outputs, [] are optional arguments, <> are required arguments, and () are the description of the function, use : for defaults [arg:defaultvalue]
+.HELP: Help:
+.HELP: This script is a simple wrapper for jump starting new action,
+.HELP: It works by parsing templates from .action_template and creating a new action replacing the variables
+.HELP: New action templates can be added by creating a new directory in .action_template
+.HELP: Modifying the content of the templates will not affect the older actions, since the content is just copied from one place to another
+.HELP: Creating new actions that use go file, will rebuild the go.work file, this way the IDE will be able to understand the go code
+.HELP: Go requirements still be the same, the go.mod file must be in the docker directory.
+
+# Just code sugar
+verbose() { DEBUG=1; $@; }
+v() { DEBUG=1; $@; }
+error() { echo "Error: $*"; return 1; }
+warn() { echo "Warning: $*"; return 0; }
+log() { echo "INFO: $*"; return 0; }
+debug() { test $DEBUG -eq 1 && echo "DEBUG: $*"; return 0; }
+
+# Read the file and print the help messages from the file
+.HELP: ""
+.HELP: "actions: Manage all actions related funcions"
+actions() {
+	.HELP: "actions create <path> [-d description] [-t template]: Create a new action"
+	create() {
+		export action_name=""
+		export action_description=""
+		export action_path=""
+		export actions_description=""
+		export actions_template=""
+		[ -z "$*" ] && error "No action name provided" && exit 1
+		args=()
+		while [ $# -gt 0 ]; do
+			case $1 in
+				--description) actions_description="$2"; shift && shift;;
+				-d) actions_description="$2"; shift && shift;;
+				-t) actions_template="$2"; shift && shift;;
+				--template) actions_template="$2"; shift && shift;;
+				*) args+=("$1"); shift;;
+			esac
+		done
+
+		[ ${#args[@]} -eq 0 ] \
+			&& error "No action name provided"
+		action_path="${args[0]}"
+
+		debug "Action name: $action_name"
+		debug "Action description: $action_description"
+		debug "Action path: $action_path"
+		debug "Action template: $actions_template"
+		debug "Creating action $action_path"
+
+		test -d "$action_path" \
+			&& error "Action already exists"
+
+		action_name="$(echo "$action_path" | rev | cut -d/ -f1 | rev)"
+
+		debug "Action name: $action_name"
+		debug "Action path: $action_path"
+
+		[[ ! $action_name =~ ^[a-z0-9_]+$ ]] \
+			&& error "Action name must be only letters and numbers and underscore and lower,\n\t'$action_name' is not valid"
+
+		[ -n "$action_description" ] \
+			&& echo "Enter action description: " \
+				&& read -r action_description
+
+		debug "Parsing template files"
+		while [ -z "$actions_template" ]; do
+			echo "Valid actions types are:"
+			ls -1 .action_template
+			ACTION_TYPE="false"
+			echo "Enter action type: " \
+				&& read -r ACTION_TYPE
+			test -d ".action_template/$ACTION_TYPE" && \
+				actions_template="$ACTION_TYPE"
+		done
+
+		debug "Creating action path $action_path"
+		mkdir "$action_path"
+
+		debug "Running substitution on templates"
+		find ".action_template/$actions_template" -type f | while read -r file; do
+			# shellcheck disable=SC2094
+			envsubst < "$file" > "$action_path/$(basename "$file")"
+		done
+
+		test -f "$action_path/go.mod" \
+			&& debug "Creating go.mod for action" \
+			&& go_version="$(grep -E '^go\s' go.work)" \
+			&& printf "module %s\n\n$go_version\n" "$action_name" > "$action_path/go.mod" \
+			&& debug Fixing go.work \
+			&& echo "$go_version" > "go.work" \
+			&& find . -name 'go.mod' | sort | while read -r file; do
+				echo "use $(dirname "$file")" >> go.work
+			done
+
+		log "Created action $action_name"
+	}
+
+	.HELP: "actions list: List all currently available actions"
+	list() {
+		echo "Available actions:"
+		debug "find . -name 'README.md'"
+		find . -name 'README.md' | while read -r file; do
+			[[ "$file" = "./README.md" ]] && continue # ignore the root readme
+			[[ "$file" =~ ^\.\/\..* ]] && continue # ignore hidden things
+			dirname "${file/\.\//}"
+		done
+	}
+
+	# now the second argument is the inner function name and it will call it again
+	if test $# -eq 0; then help; else $@ || help; fi
+}
+
+.HELP: "pr: Show current pr in the terminal"
+pr() {
+	.HELP: "pr status: Show the current pr status and pipeline checks"
+	status() { gh pr status; gh pr checks; }
+	.HELP: "pr open: Open pr in the browser"
+	open() { gh pr view --web; }
+	.HELP: "pr watch [interval:5]: Watch for pr pipeline "
+	watch() { gh pr checks --watch --interval "${1:-5}"; }
+	.HELP: "pr push [interval:5] Pushs commits to current branch and watch for pipelines update status"
+	push() { git push origin "$(git branch --show-current)" ; sleep 5; watch "${1:-5}"; }
+
+	# Example setting a default function,
+	if test $# -eq 0; then status; else $@ || help; fi
+}
+
+# Chaining $@ as the entrypoint for the script and the functions call a somewhat functional approach
+# for example: ./help.sh actions create --description "This is a new action" --template "docker" "my-awesome-go-action"
+# will call actions function with args: create --description "This is a new action" --template "docker" "my-awesome-go-action"
+# then the actions.create function will be called with the args: --description "This is a new action" --template "docker" "my-awesome-go-action"
+if test $# -eq 0; then
+	help
+else
+	$@ || help
+fi

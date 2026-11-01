@@ -1,0 +1,178 @@
+# CompileCorePlatformMqTest.yaml — CompileCorePlatformMqTest configuration
+
+# CompileCorePlatformMqTest.yaml — CompileCorePlatformMqTest configuration
+
+name: '$(BuildDefinitionName)_$(Date:yyyMMdd)$(rev:.rr)'
+
+parameters:
+- name: usePreviousSuccessfulBuildArtifacts
+  displayName: Use Previous Successful Build Artifacts
+  type: boolean
+  default: true
+- name: useMicrosoftAgent
+  displayName: Use Microsoft Agent (good test of build agent dependencies but much slower due to the massive CoreService git repository not being cached)
+  type: boolean
+  default: false
+- name: environment
+  displayName: Send Files to Environment
+  type: string
+  values:
+    - UAT
+    #- UATDR
+  default: UAT
+
+trigger: none
+
+variables:
+  BuildTagName: HasBuildArtifacts
+  MqTestArtifactName: MqTest
+  ${{ if eq(parameters.usePreviousSuccessfulBuildArtifacts, true) }}:
+    ArtifactSource: thisPipeline
+    AdditionalArtifactPath: /thisPipeline
+  ${{ else }}:
+    ArtifactSource: current
+    AdditionalArtifactPath:
+
+resources:
+  pipelines:
+    - pipeline: thisPipeline
+      source: CoreService MqTest AWS UATDR (PaC)
+      trigger: none
+      # it seems that variables cannot be used here, so it's hard coded:
+      tags:
+        - HasBuildArtifacts
+
+stages:
+- ${{ if eq(parameters.usePreviousSuccessfulBuildArtifacts, false) }}:
+  - stage: stage_build
+    condition: ${{ not(parameters.usePreviousSuccessfulBuildArtifacts) }}
+    jobs:
+    - job: job_build
+      displayName: 'Job: Build CoreService'
+
+      pool:
+        ${{ if eq(parameters.useMicrosoftAgent, false) }}:
+          name: CoreService-Code-CI
+          demands: msbuild
+        ${{ else }}:
+          name: Azure Pipelines
+          vmImage: windows-latest
+
+      variables:
+        BuildOutputPath: $(System.DefaultWorkingDirectory)/Work/Release/MqTest
+
+      steps:
+      - checkout: self
+
+      - powershell: |
+          dir env:
+        displayName: Display environment variables
+
+      - task: MSBuild@1
+        inputs:
+          solution: CompileMqTest.proj
+          msbuildVersion: "15.0"
+          platform: Any CPU
+          configuration: Release
+          logProjectEvents: true
+          logFileVerbosity: detailed
+        displayName: Build solution CompileMqTest.proj
+
+      #TODO: this can be done via the .artifactignore file:
+      - powershell: |
+          Remove-Item -Recurse -Force de-DE
+          Remove-Item -Recurse -Force en-AU
+          Remove-Item -Recurse -Force en-GB
+          Remove-Item -Recurse -Force en-NZ
+          Remove-Item -Recurse -Force es-ES
+          Remove-Item -Recurse -Force fr-CA
+          Remove-Item -Recurse -Force fr-FR
+          Remove-Item -Recurse -Force it-IT
+          Remove-Item -Recurse -Force nl-BE
+          Remove-Item -Recurse -Force nl-NL
+          Remove-Item -Recurse -Force pt-BR
+          Remove-Item -Recurse -Force zu-ZA
+        workingDirectory: $(BuildOutputPath)
+        displayName: Cleanup before publishing artifact
+
+      - publish: $(BuildOutputPath)
+        artifact: $(MqTestArtifactName)
+        displayName: Publish MqTest artifacts
+
+      - powershell: |
+          Write-Host "##vso[build.addbuildtag]$(BuildTagName)"
+        displayName: Tag the pipeline run
+
+      - task: BuildQualityChecks@8
+        inputs:
+          checkWarnings: true
+          warningFailOption: fixed
+          warningThreshold: 6
+        displayName: Check build quality
+
+- stage: deploy_UAT
+  displayName: 'Deploy: UAT'
+  ${{ if eq(parameters.usePreviousSuccessfulBuildArtifacts, false) }}:
+    dependsOn: stage_build
+  condition: not(failed())
+  jobs:
+  - deployment: job_deploy_uat
+    displayName: "Deploy to Env: UAT"
+    # GitHub Environment — enables deployment protection rules and secrets scoping
+    environment: env-enc-uat
+    pool: CpAWS-UAT
+    workspace:
+      clean: all
+    condition: not(failed())
+
+    variables:
+      Environment: UAT
+      FI: FINSERV
+      AWSRegion: us-east-1
+      AWSRegionAbbrev: ue1
+      MqTestSourcePath: $(Agent.BuildDirectory)${{ variables.AdditionalArtifactPath }}/$(MqTestArtifactName)
+      MqTestDestPath: C:/CoreService/PartnerMQ/MQTest/$(Build.BuildId)
+      MqTestS3BucketName: finserv-ue1-cpt-enc-uat-mqtest-update
+      #TODO: create this bucket via terraform and then start using it here:
+      #MqTestS3BucketName: uw2-cpt-enc-uat-mqtest-update
+      TargetMachineName: "${{ lower(variables.AWSRegionAbbrev) }}-cpt-enc-finserv-${{ lower(variables.Environment) }}-app-mqtest"
+
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - checkout: none
+
+          - download: ${{ variables.ArtifactSource }}
+            artifact: $(MqTestArtifactName)
+            displayName: Download MqTest artifact
+
+          - powershell: |
+              dir -s
+            workingDirectory: $(Agent.BuildDirectory)
+            displayName: List files in pipeline working folders
+
+          - powershell: |
+              $machinesToFind = "$(TargetMachineName)"
+
+              $foundCount = (aws ec2 describe-instances --filters "Name=tag:Name,Values=$machinesToFind" --query "Reservations[*].Instances[*].InstanceId").Count
+
+              if ($foundCount -eq 0) {
+                Write-Error "ERROR: Expected to find one server named $machinesToFind but found $foundCount."
+                Exit -1
+              }
+
+              $instanceId = aws ec2 describe-instances --filters "Name=tag:Name,Values=$machinesToFind" --query "Reservations[*].Instances[*].InstanceId | [0][0]"
+              Write-Host "InstanceId = $instanceId"
+              echo "##vso[task.setvariable variable=TargetInstanceId]${instanceId}"
+            displayName: Get IP for target server
+
+          - powershell: |
+              dir env:
+            displayName: Display environment variables
+
+          - powershell: |
+              Write-Host "[section]Uploading files to S3 bucket $(FI) $(MqTestS3BucketName)"
+
+              Write-S3Object -Region "$(AWSregion)" -BucketName "$(MqTestS3BucketName)" -KeyPrefix "$(FI)" -Folder "$(MqTestSourcePath)"
+            displayName: Copy artifacts to S3

@@ -1,0 +1,29 @@
+#!groovy
+
+properties(
+        [
+                ([
+                        $class       : 'DatadogJobProperty',
+                        tagProperties: "jenkins.job.duration,jenkins.job.status"
+                ])
+        ]
+)
+
+disableConcurrentBuilds()
+
+node("dev") {
+    stage('Prep') {
+        buildName "${env.BUILD_NUMBER}) ${env.CHANGE_AUTHOR}"
+    }
+
+    stage ('Test') {
+        checkout scm
+
+        withDockerRegistry(credentialsId: 'tag-devops-cloud-artifactory-creds', url: 'https://registry.example.io/') {
+            docker.image("registry.example.io/docker-prod/app/tag-utilities/builder:1.21.3").inside("-u root") {
+                sh 'go mod vendor'
+                sh 'go test ./log'
+            }
+        }
+    }
+}

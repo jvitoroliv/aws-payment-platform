@@ -1,0 +1,74 @@
+[CmdletBinding()]
+
+param(
+)
+
+try {
+    Start-Transcript -Path C:\SQLClusterDSCConfig\log\DownloadSQLEE.ps1.txt -Append
+
+    $ErrorActionPreference = "Stop"
+
+    $DestPath = "C:\SQLClusterDSCConfig\SQLMedia\"
+    New-Item "$DestPath" -Type directory -Force
+
+    Write-Host "Downloading SQL 2017 ISO."
+    $s3bucket = "${sql_server_iso_bucket}"
+    $fileName = "en_sql_server_2017_enterprise_core_x64_dvd_11293037.iso"
+    $key = "automation-source-data/sql_server_2017/$fileName"
+    $outfile = $DestPath + $fileName
+
+    # Download SQL 2017 EE from S3 bucket. Using AWS PowerShell SDK in order to take advantage of 
+    # Instance profile permissions.
+    $S3LastUpdated = (Get-S3Object -BucketName $s3bucket -Key $key).LastModified
+
+    # Download: If local file does not exist
+    # OR (if local file exists AND the S3 version is newer)
+    If (  (-Not (Test-Path $outfile -PathType Leaf) ) -or ( ($S3LastUpdated -gt (Get-Item $outfile).LastWriteTime) -and (Test-Path $outfile -PathType Leaf) ) ) {
+      Read-S3Object -BucketName $s3bucket -Key $key -File $outfile -Verbose
+    }
+    Write-Host "Download complete."
+
+
+    # Download SSMS:
+    Write-Host "Downloading SSMS."
+    $fileName = "17.3-SSMS-Setup-ENU.exe"
+    $key = "automation-source-data/sql_server_2017/$fileName"
+    $outfile = $DestPath + $fileName
+
+    # Download: If local file does not exist
+    # OR (if local file exists AND the S3 version is newer)
+    $S3LastUpdated = (Get-S3Object -BucketName $s3bucket -Key $key).LastModified
+    If (  (-Not (Test-Path $outfile -PathType Leaf) ) -or ( ($S3LastUpdated -gt (Get-Item $outfile).LastWriteTime) -and (Test-Path $outfile -PathType Leaf) ) ) {
+      Read-S3Object -BucketName $s3bucket -Key $key -File $outfile -Verbose
+    }
+    Write-Host "Download complete."
+
+
+    # Download CIS install scripts
+    Write-Host "Downloading CIS Scripts."
+    $fileName = "install.zip"
+    $key = "automation-source-data/cis/$filename"
+    $outfile = "C:\TEMP\$fileName"
+
+    # Download: If local file does not exist
+    # OR (if local file exists AND the S3 version is newer)
+    $S3LastUpdated = (Get-S3Object -BucketName $s3bucket -Key $key).LastModified
+    If (  (-Not (Test-Path $outfile -PathType Leaf) ) -or ( ($S3LastUpdated -gt (Get-Item $outfile).LastWriteTime) -and (Test-Path $outfile -PathType Leaf) ) ) {
+      Read-S3Object -BucketName $s3bucket -Key $key -File $outfile -Verbose
+    }
+    Write-Host "Download complete."
+
+    Write-Host "Unzipping CIS Scripts."
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    function Unzip
+    {
+        param([string]$zipfile, [string]$outpath)
+        [System.IO.Compression.ZipFile]::ExtractToDirectory($zipfile, $outpath)
+    }
+    Unzip "C:\TEMP\install.zip" "C:\install"
+    Write-Host "Unzip complete."
+}
+catch {
+    Write-Verbose "$($_.exception.message)@ $(Get-Date)"
+    throw $_
+}

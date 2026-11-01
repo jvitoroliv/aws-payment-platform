@@ -1,0 +1,278 @@
+---
+schemaVersion: '0.3'
+description: SSM document
+mainSteps:
+- name: "InstallDscModules"
+  action: "aws:runCommand"
+  nextStep: "LCMConfig"
+  onFailure: "step:OnFailureAlertSNS"
+  timeoutSeconds: ${executionTimeout}
+  inputs:
+    DocumentName: "AWS-RunRemoteScript"
+    InstanceIds:
+    - "${instance_id}"
+    CloudWatchOutputConfig:
+      CloudWatchOutputEnabled: "true"
+      CloudWatchLogGroupName: "coreplatform-ssm-automation/${enc_fi}-${domain_dns_name}-sql-primary-node"
+    Parameters:
+      sourceType: "S3"
+      sourceInfo: {"path": "https://s3.amazonaws.com/${automation_scripts_bucket}/scripts/install-dsc-modules.ps1"}
+      commandLine: "./install-dsc-modules.ps1"
+- name: "LCMConfig"
+  action: "aws:runCommand"
+  onFailure: "step:OnFailureAlertSNS"
+  timeoutSeconds: ${executionTimeout}
+  inputs:
+    DocumentName: "AWS-RunRemoteScript"
+    InstanceIds:
+    - "${instance_id}"
+    CloudWatchOutputConfig:
+      CloudWatchOutputEnabled: "true"
+      CloudWatchLogGroupName: "coreplatform-ssm-automation/${enc_fi}-${domain_dns_name}-sql-primary-node"
+    Parameters:
+      sourceType: "S3"
+      sourceInfo: {"path": "https://s3.amazonaws.com/${automation_scripts_bucket}/scripts/LCM-Config.ps1"}
+      commandLine: "./LCM-Config.ps1"
+- name: "WindowsFeaturesInstallMOF"
+  action: "aws:runCommand"
+  onFailure: "step:OnFailureAlertSNS"
+  timeoutSeconds: ${executionTimeout}
+  inputs:
+    DocumentName: "AWS-RunRemoteScript"
+    InstanceIds:
+    - "${instance_id}"
+    CloudWatchOutputConfig:
+      CloudWatchOutputEnabled: "true"
+      CloudWatchLogGroupName: "coreplatform-ssm-automation/${enc_fi}-${domain_dns_name}-sql-primary-node"
+    Parameters:
+      sourceType: "S3"
+      sourceInfo: {"path": "https://s3.amazonaws.com/${automation_scripts_bucket}/scripts/install-windows-features.ps1"}
+      commandLine: "./install-windows-features.ps1"
+- name: "WindowsFeaturesInstall"
+  action: aws:runCommand
+  onFailure: "step:OnFailureAlertSNS"
+  timeoutSeconds: ${executionTimeout}
+  inputs:
+    DocumentName: AWS-RunPowerShellScript
+    InstanceIds: 
+    - "${instance_id}"
+    CloudWatchOutputConfig:
+      CloudWatchOutputEnabled: "true"
+      CloudWatchLogGroupName: "coreplatform-ssm-automation/${enc_fi}-${domain_dns_name}-sql-primary-node"
+    Parameters:
+      commands: 
+        - |     
+           function DscStatusCheck () {
+               $LCMState = (Get-DscLocalConfigurationManager).LCMState
+               if ($LCMState -eq 'PendingConfiguration' -Or $LCMState -eq 'PendingReboot') {
+                   'returning 3010, should continue after reboot'
+                   exit 3010
+               } else {
+                 'Completed'
+               }
+           }
+           
+           Start-DscConfiguration 'C:\SQLClusterDSCConfig\AddWindowsFeatures' -Wait -Verbose -Force
+    
+           DscStatusCheck
+- name: "PrimaryNodeMof"
+  action: "aws:runCommand"
+  onFailure: "step:OnFailureAlertSNS"
+  timeoutSeconds: ${executionTimeout}
+  inputs:
+    DocumentName: "AWS-RunRemoteScript"
+    InstanceIds:
+    - "${instance_id}"
+    CloudWatchOutputConfig:
+      CloudWatchOutputEnabled: "true"
+      CloudWatchLogGroupName: "coreplatform-ssm-automation/${enc_fi}-${domain_dns_name}-sql-primary-node"
+    Parameters:
+      sourceType: "S3"
+      sourceInfo: {"path": "https://s3.amazonaws.com/${automation_scripts_bucket}/scripts/PrimaryNodeConfig.ps1"}
+      commandLine: "./PrimaryNodeConfig.ps1 -DomainAdminUser ${ad_admin_user} -DomainAdminPasswordARN ${ad_password_secrets_arn} -WSFCStaticIP ${cluster_ip_node1} -Node2ClusterIP ${cluster_ip_node2} -ClusterName ${cluster_name} -NetBiosDomainName ${netbios_domain_name} -DomainDNSName ${domain_dns_name} -SQLSvcAcctCredentialsARN ${sql_svcacct_creds_secrets_arn} -DefaultPoolEBSVolumes ${default_pool_ebs_volumes} -FCIPoolEBSVolumes ${fci_pool_ebs_volumes} -CorePlatformPoolEBSVolumes ${coreplatform_pool_ebs_volumes} -ArchivePoolEBSVolumes ${archive_pool_ebs_volumes} -BackupPoolEBSVolumes ${backup_pool_ebs_volumes} -EncFI ${enc_fi} -SQLClusterNetworkName ${sql_cluster_network_name}"
+- name: "PrimaryNodeConfig"
+  action: aws:runCommand
+  onFailure: "step:OnFailureAlertSNS"
+  timeoutSeconds: ${executionTimeout}
+  inputs:
+    DocumentName: AWS-RunPowerShellScript
+    InstanceIds: 
+    - "${instance_id}"
+    CloudWatchOutputConfig:
+      CloudWatchOutputEnabled: "true"
+      CloudWatchLogGroupName: "coreplatform-ssm-automation/${enc_fi}-${domain_dns_name}-sql-primary-node"
+    Parameters:
+      commands: 
+        - |     
+           function DscStatusCheck () {
+               $LCMState = (Get-DscLocalConfigurationManager).LCMState
+               if ($LCMState -eq 'PendingConfiguration' -Or $LCMState -eq 'PendingReboot') {
+                   'returning 3010, should continue after reboot'
+                   exit 3010
+               } else {
+                 'Completed'
+               }
+           }
+           
+           Start-DscConfiguration 'C:\SQLClusterDSCConfig\PrimaryNodeConfig' -Wait -Verbose -Force
+
+           DscStatusCheck
+- name: "DownloadSQL"
+  action: "aws:runCommand"
+  onFailure: "step:OnFailureAlertSNS"
+  timeoutSeconds: ${executionTimeout}
+  inputs:
+    DocumentName: "AWS-RunRemoteScript"
+    InstanceIds:
+    - "${instance_id}"
+    CloudWatchOutputConfig:
+      CloudWatchOutputEnabled: "true"
+      CloudWatchLogGroupName: "coreplatform-ssm-automation/${enc_fi}-${domain_dns_name}-sql-primary-node"
+    Parameters:
+      sourceType: "S3"
+      sourceInfo: {"path": "https://s3.amazonaws.com/${automation_scripts_bucket}/scripts/download-sqlee.ps1"}
+      commandLine: "./download-sqlee.ps1"
+- name: "SQLInstallMOF"
+  action: "aws:runCommand"
+  onFailure: "step:OnFailureAlertSNS"
+  timeoutSeconds: ${executionTimeout}
+  inputs:
+    DocumentName: "AWS-RunRemoteScript"
+    InstanceIds:
+    - "${instance_id}"
+    CloudWatchOutputConfig:
+      CloudWatchOutputEnabled: "true"
+      CloudWatchLogGroupName: "coreplatform-ssm-automation/${enc_fi}-${domain_dns_name}-sql-primary-node"
+    Parameters:
+      sourceType: "S3"
+      sourceInfo: {"path": "https://s3.amazonaws.com/${automation_scripts_bucket}/scripts/install-sqlee.ps1"}
+      commandLine: "./install-sqlee.ps1 -DomainAdminUser ${ad_admin_user} -DomainAdminPasswordARN ${ad_password_secrets_arn} -NetBiosDomainName ${netbios_domain_name} -SQLSvcAcctCredentialsARN ${sql_svcacct_creds_secrets_arn} -SQLLoginCredentialsARN ${sql_login_creds_secrets_arn} -SQLInstanceName ${sql_instance_name} -ClusterName ${cluster_name} -SQLClusterNetworkName ${sql_cluster_network_name} -SQLClusterIP ${sql_ip_node1} -Node2SQLIP ${sql_ip_node2} -EncFI ${enc_fi}"
+- name: "SQLInstall"
+  action: aws:runCommand
+  onFailure: "step:OnFailureAlertSNS"
+  timeoutSeconds: ${executionTimeout}
+  inputs:
+    DocumentName: AWS-RunPowerShellScript
+    InstanceIds: 
+    - "${instance_id}"
+    CloudWatchOutputConfig:
+      CloudWatchOutputEnabled: "true"
+      CloudWatchLogGroupName: "coreplatform-ssm-automation/${enc_fi}-${domain_dns_name}-sql-primary-node"
+    Parameters:
+      commands: 
+        - |     
+           function DscStatusCheck () {
+               $LCMState = (Get-DscLocalConfigurationManager).LCMState
+               if ($LCMState -eq 'PendingConfiguration' -Or $LCMState -eq 'PendingReboot') {
+                   'returning 3010, should continue after reboot'
+                   exit 3010
+               } else {
+                 'Completed'
+               }
+           }
+           
+           Start-DscConfiguration 'C:\SQLClusterDSCConfig\SQLInstall' -Wait -Verbose -Force
+    
+           DscStatusCheck
+- name: "InstallSSMS"
+  action: aws:runCommand
+  onFailure: "step:OnFailureAlertSNS"
+  timeoutSeconds: ${executionTimeout}
+  inputs:
+    DocumentName: AWS-RunPowerShellScript
+    InstanceIds: 
+    - "${instance_id}"
+    CloudWatchOutputConfig:
+      CloudWatchOutputEnabled: "true"
+      CloudWatchLogGroupName: "coreplatform-ssm-automation/${enc_fi}-${domain_dns_name}-sql-primary-node"
+    Parameters:
+      commands: 
+        - |     
+            $path = "C:\Program Files (x86)\Microsoft SQL Server\140\Tools\Binn\ManagementStudio\Ssms.exe"
+            If (-not (Test-Path $path -PathType Leaf))
+            {
+                C:\SQLClusterDSCConfig\SQLMedia\17.3-SSMS-Setup-ENU.exe /install /quiet /norestart /log C:\work\ssms_install.log
+            }
+- name: "InstallKPK"
+  action: "aws:runCommand"
+  onFailure: "step:OnFailureAlertSNS"
+  timeoutSeconds: ${executionTimeout}
+  inputs:
+    DocumentName: "AWS-RunRemoteScript"
+    InstanceIds:
+    - "${instance_id}"
+    CloudWatchOutputConfig:
+      CloudWatchOutputEnabled: "true"
+      CloudWatchLogGroupName: "coreplatform-ssm-automation/${enc_fi}-${domain_dns_name}-sql-primary-node"
+    Parameters:
+      sourceType: "S3"
+      sourceInfo: {"path": "https://s3.amazonaws.com/${automation_scripts_bucket}/scripts/install-kpk.ps1"}
+      commandLine: "./install-kpk.ps1  -DomainAdminUser ${ad_admin_user} -DomainAdminPasswordARN ${ad_password_secrets_arn} -NetBiosDomainName ${netbios_domain_name} -SQLSvcAcctCredentialsARN ${sql_svcacct_creds_secrets_arn} -ArtifactsBucket ${coreplatform_artifacts_bucket} -Environment ${environment}"
+- name: "DbRestoreMOF"
+  action: "aws:runCommand"
+  onFailure: "step:OnFailureAlertSNS"
+  timeoutSeconds: ${executionTimeout}
+  inputs:
+    DocumentName: "AWS-RunRemoteScript"
+    InstanceIds:
+    - "${instance_id}"
+    CloudWatchOutputConfig:
+      CloudWatchOutputEnabled: "true"
+      CloudWatchLogGroupName: "coreplatform-ssm-automation/${enc_fi}-${domain_dns_name}-sql-primary-node"
+    Parameters:
+      sourceType: "S3"
+      sourceInfo: {"path": "https://s3.amazonaws.com/${automation_scripts_bucket}/scripts/restore-db-backups.ps1"}
+      commandLine: "./restore-db-backups.ps1  -DomainAdminUser ${ad_admin_user} -DomainAdminPasswordARN ${ad_password_secrets_arn} -NetBiosDomainName ${netbios_domain_name} -SQLLoginCredentialsARN ${sql_login_creds_secrets_arn} -SQLInstanceName ${sql_instance_name} -SQLClusterNetworkName ${sql_cluster_network_name} -EncFI ${enc_fi} -Environment ${environment} -SqlBackupsBucket ${sql_backups_bucket}"
+- name: "DbRestore"
+  action: aws:runCommand
+  onFailure: "step:OnFailureAlertSNS"
+  timeoutSeconds: ${executionTimeout}
+  inputs:
+    DocumentName: AWS-RunPowerShellScript
+    InstanceIds: 
+    - "${instance_id}"
+    CloudWatchOutputConfig:
+      CloudWatchOutputEnabled: "true"
+      CloudWatchLogGroupName: "coreplatform-ssm-automation/${enc_fi}-${domain_dns_name}-sql-primary-node"
+    Parameters:
+      executionTimeout: "36000"
+      commands: 
+        - |     
+           function DscStatusCheck () {
+               $LCMState = (Get-DscLocalConfigurationManager).LCMState
+               if ($LCMState -eq 'PendingConfiguration' -Or $LCMState -eq 'PendingReboot') {
+                   'returning 3010, should continue after reboot'
+                   exit 3010
+               } else {
+                 'Completed'
+               }
+           }
+           
+           Start-DscConfiguration 'C:\SQLClusterDSCConfig\DbRestore' -Wait -Verbose -Force
+    
+           DscStatusCheck
+- name: "CISScripts"
+  action: aws:runCommand
+  onFailure: "step:OnFailureAlertSNS"
+  timeoutSeconds: ${executionTimeout}
+  inputs:
+    DocumentName: AWS-RunPowerShellScript
+    InstanceIds: 
+    - "${instance_id}"
+    CloudWatchOutputConfig:
+      CloudWatchOutputEnabled: "true"
+      CloudWatchLogGroupName: "coreplatform-ssm-automation/${enc_fi}-${domain_dns_name}-sql-primary-node"
+    Parameters:
+      commands: 
+        - |     
+            Set-Location C:\install
+            .\run_once.ps1
+  isEnd: true
+- name: "OnFailureAlertSNS"
+  action: "aws:executeAwsApi"
+  inputs:
+    Service: SNS
+    Api: Publish
+    TopicArn: "${failure_alerts_sns_topic}"
+    Message: "SSM automation of Primary node in SQL Cluster failed. Please investigate."
+  isEnd: true

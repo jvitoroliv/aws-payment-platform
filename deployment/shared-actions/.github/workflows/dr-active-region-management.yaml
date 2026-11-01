@@ -1,0 +1,228 @@
+# dr-active-region-management.yaml
+# dr-active-region-management configuration
+
+name: Disaster Recovery Active Region Management
+
+run-name: Set ${{ inputs.active_region }} as the active region in ${{ inputs.environment }}
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        default: 1.0.2
+        description: The semver of the workflow for automated tagging.
+        required: false
+        type: string
+      active_region:
+        description: "Active region"
+        required: true
+        type: string
+      environment:
+        description: "Environment to run the pipeline for"
+        required: true
+        type: string
+      us_east_1_backend_config_path:
+        description: "Path to us-east-1 backend config file"
+        required: true
+        type: string
+      us_east_1_var_file_path:
+        description: "Path to us-east-1 Terraform variable file"
+        required: true
+        type: string
+      us_west_2_backend_config_path:
+        description: "Path to us-west-2 backend config file"
+        required: true
+        type: string
+      us_west_2_var_file_path:
+        description: "Path to us-west-2 Terraform variable file"
+        required: true
+        type: string
+      working_directory:
+        description: "Terraform working directory"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  deployments: write
+
+concurrency:
+  cancel-in-progress: false
+  group: ${{ github.workflow }}-${{ inputs.environment }}
+
+jobs:
+  process-input:
+    name: Process Input
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate Inputs
+        run: |
+          if [[ "${{ inputs.active_region }}" != "us-east-1" && "${{ inputs.active_region }}" != "us-west-2" ]]; then
+            echo "::error::Invalid active_region: ${{ inputs.active_region }}. Supported values are 'us-east-1' and 'us-west-2'."
+            exit 1
+          fi
+
+          if [[ "${{ inputs.environment }}" != "dev" && "${{ inputs.environment }}" != "test" && "${{ inputs.environment }}" != "stage" && "${{ inputs.environment }}" != "prod" ]]; then
+            echo "::error::Invalid environment: ${{ inputs.environment }}. Must be one of: dev, test, stage, prod."
+            exit 1
+          fi
+
+          if [ ! -d "${{ inputs.working_directory }}" ]; then
+            echo "::error::Working directory does not exist: ${{ inputs.working_directory }}"
+            exit 1
+          fi
+
+          cd "${{ inputs.working_directory }}" || { echo "::error::Failed to change directory to ${{ inputs.working_directory }}"; exit 1; }
+
+          if [ ! -f "${{ inputs.us_east_1_backend_config_path }}" ]; then
+            echo "::error::us_east_1_backend_config_path file does not exist: ${{ inputs.us_east_1_backend_config_path }}"
+            exit 1
+          fi
+
+          if [ ! -f "${{ inputs.us_west_2_backend_config_path }}" ]; then
+            echo "::error::us_west_2_backend_config_path file does not exist: ${{ inputs.us_west_2_backend_config_path }}"
+            exit 1
+          fi
+
+          if [ ! -f "${{ inputs.us_east_1_var_file_path }}" ]; then
+            echo "::error::us_east_1_var_file_path file does not exist: ${{ inputs.us_east_1_var_file_path }}"
+            exit 1
+          fi
+
+          if [ ! -f "${{ inputs.us_west_2_var_file_path }}" ]; then
+            echo "::error::us_west_2_var_file_path file does not exist: ${{ inputs.us_west_2_var_file_path }}"
+            exit 1
+          fi
+
+      - name: Generate Step Summary
+        run: |
+          # Create a markdown table for the step summary
+          echo "## DR Active Region Management Configuration" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Input | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "| --- | --- |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Active Region** | ${{ inputs.active_region }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Environment** | ${{ inputs.environment }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Working Directory** | ${{ inputs.working_directory }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "### Region Configuration" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Region | Status | Backend Config | Var File |" >> $GITHUB_STEP_SUMMARY
+          echo "| --- | --- | --- | --- |" >> $GITHUB_STEP_SUMMARY
+          echo "| us-east-1 | ${{ inputs.active_region == 'us-east-1' && '✅ Active' || '⏸️ Inactive' }} | \`${{ inputs.us_east_1_backend_config_path }}\` | \`${{ inputs.us_east_1_var_file_path }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| us-west-2 | ${{ inputs.active_region == 'us-west-2' && '✅ Active' || '⏸️ Inactive' }} | \`${{ inputs.us_west_2_backend_config_path }}\` | \`${{ inputs.us_west_2_var_file_path }}\` |" >> $GITHUB_STEP_SUMMARY
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Deployment Order" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "1. ${{ inputs.active_region == 'us-east-1' && 'us-west-2' || 'us-east-1' }} (Inactive Region)" >> $GITHUB_STEP_SUMMARY
+          echo "2. ${{ inputs.active_region }} (Active Region)" >> $GITHUB_STEP_SUMMARY
+
+  plan-us-east-1:
+    needs: process-input
+    uses: example-org/shared-actions/.github/workflows/terraform-plan.yaml@terraform-plan-v1
+    with:
+      backend_config_path: ${{ inputs.us_east_1_backend_config_path }}
+      environment: ${{ inputs.environment }}
+      region: "us-east-1"
+      terraform_variables: "active_region=${{ inputs.active_region }}"
+      var_file_path: ${{ inputs.us_east_1_var_file_path }}
+      working_directory: ${{ inputs.working_directory }}
+
+  plan-us-west-2:
+    needs: process-input
+    uses: example-org/shared-actions/.github/workflows/terraform-plan.yaml@terraform-plan-v1
+    with:
+      backend_config_path: ${{ inputs.us_west_2_backend_config_path }}
+      environment: ${{ inputs.environment }}
+      region: "us-west-2"
+      terraform_variables: "active_region=${{ inputs.active_region }}"
+      var_file_path: ${{ inputs.us_west_2_var_file_path }}
+      working_directory: ${{ inputs.working_directory }}
+
+  approval-region-ordering:
+    name: Approval Check and Region Ordering
+    runs-on: team-${{ inputs.environment }}
+    needs:
+      - plan-us-east-1
+      - plan-us-west-2
+    if: needs.plan-us-east-1.outputs.plan_changed == 'true' || needs.plan-us-west-2.outputs.plan_changed == 'true'
+    environment: ${{ inputs.environment }}
+    steps:
+      - id: regions-order
+        name: Determine region order
+        run: |
+          # Predefine region configs
+
+          US_EAST_1_CONFIG=$(cat <<EOF
+          {
+            "backend_config_path": "${{ inputs.us_east_1_backend_config_path }}",
+            "is_active": "${{ inputs.active_region == 'us-east-1' && 'true' || 'false' }}",
+            "plan_cache_key": "${{ needs.plan-us-east-1.outputs.plan_cache_key }}",
+            "plan_changed": "${{ needs.plan-us-east-1.outputs.plan_changed }}",
+            "region": "us-east-1",
+            "var_file_path": "${{ inputs.us_east_1_var_file_path }}"
+          }
+          EOF
+          )
+
+          US_WEST_2_CONFIG=$(cat <<EOF
+          {
+            "backend_config_path": "${{ inputs.us_west_2_backend_config_path }}",
+            "is_active": "${{ inputs.active_region == 'us-west-2' && 'true' || 'false' }}",
+            "plan_cache_key": "${{ needs.plan-us-west-2.outputs.plan_cache_key }}",
+            "plan_changed": "${{ needs.plan-us-west-2.outputs.plan_changed }}",
+            "region": "us-west-2",
+            "var_file_path": "${{ inputs.us_west_2_var_file_path }}"
+          }
+          EOF
+          )
+
+          # Determine order of regions (inactive first, then active)
+          FIRST_REGION=""
+          SECOND_REGION=""
+          if [[ "${{ inputs.active_region }}" == "us-east-1" ]]; then
+            FIRST_REGION="$US_WEST_2_CONFIG"
+            SECOND_REGION="$US_EAST_1_CONFIG"
+          else
+            FIRST_REGION="$US_EAST_1_CONFIG"
+            SECOND_REGION="$US_WEST_2_CONFIG"
+          fi
+
+          # Create the region matrix
+          echo "region_matrix<<EOF" >> $GITHUB_OUTPUT
+          echo "[
+            $FIRST_REGION,
+            $SECOND_REGION
+          ]" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+          echo "Region application order:"
+          echo "1. ${{ inputs.active_region == 'us-east-1' && 'us-west-2' || 'us-east-1' }} (inactive)"
+          echo "2. ${{ inputs.active_region }} (active)"
+    outputs:
+      region_matrix: ${{ steps.regions-order.outputs.region_matrix }}
+
+  apply-terraform:
+    # Apply changes to the regions sequentially, stop if any region fails
+    name: Apply - ${{ matrix.region_config.region }} ${{ matrix.region_config.is_active == 'true' && '(Active)' || '(Inactive)' }}
+    needs: approval-region-ordering
+    strategy:
+      fail-fast: true
+      matrix:
+        region_config: ${{ fromJSON(needs.approval-region-ordering.outputs.region_matrix) }}
+      max-parallel: 1
+    uses: example-org/shared-actions/.github/workflows/terraform-apply.yaml@terraform-apply-v1
+    with:
+      backend_config_path: ${{ matrix.region_config.backend_config_path }}
+      environment: ${{ inputs.environment }}
+      plan_cache_key: ${{ matrix.region_config.plan_cache_key }}
+      region: ${{ matrix.region_config.region }}
+      skip: ${{ matrix.region_config.plan_changed == 'false' }}
+      working_directory: ${{ inputs.working_directory }}

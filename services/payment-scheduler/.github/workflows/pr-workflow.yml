@@ -1,0 +1,84 @@
+# pr-workflow.yml
+# pr-workflow configuration
+
+name: PR Workflow
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  build-and-test:
+    runs-on: team-dev
+    steps:
+      - name: Set version
+        run: echo "VERSION=$( echo ${{ github.head_ref }}-${{ github.run_number }} | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9_-]//g')" >> $GITHUB_ENV
+
+      - name: Set compose command
+        run: echo "COMPOSE_COMMAND=docker-compose -f docker-compose.yml -p ${{ env.VERSION }}" >> $GITHUB_ENV
+
+      - name: Fix workspace file permissions
+        run: |
+          sudo chmod -R ugo+rwx ${GITHUB_WORKSPACE}
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Pull Docker Compose dependencies
+        run: |
+          ${{ env.COMPOSE_COMMAND }} pull --ignore-buildable
+          ${{ env.COMPOSE_COMMAND }} up -d builder
+
+      - name: Get Read Only Token
+        id: generate_token
+        uses: example-org/fabric-action-github-app-token@v1
+        with:
+          secret: ${{ secrets.FABRIC_SHARED_ACTION_READONLY_KEY }}
+
+      - name: Download dependencies
+        run: |
+          ${{ env.COMPOSE_COMMAND }} exec -T -e GH_TOKEN=${GH_TOKEN} builder sh -c 'git config --system url."https://noop:${GH_TOKEN}@github.com/example-org".insteadOf "https://github.com/example-org"'
+          ${{ env.COMPOSE_COMMAND }} exec -T -e GH_TOKEN=${GH_TOKEN} builder sh -c 'go mod download'
+        env:
+          GH_TOKEN: ${{ steps.generate_token.outputs.token }}
+
+      - name: Build binary
+        run: ${{ env.COMPOSE_COMMAND }} exec -T builder sh -c './build/compile.sh'
+
+      - name: Go Lint
+        run: ${{ env.COMPOSE_COMMAND }} exec -T builder sh -c 'GOBIN=/go/bin GOFLAGS=-buildvcs=false GOTOOLCHAIN=auto make check'
+
+      - name: Go Unit Tests
+        run: ${{ env.COMPOSE_COMMAND }} exec -T builder sh -c 'CGO_ENABLED=1 GOFLAGS=-buildvcs=false make unit-test'
+
+      - name: Go Race Condition Check
+        run: ${{ env.COMPOSE_COMMAND }} exec -T builder sh -c 'CGO_ENABLED=1 GOFLAGS=-buildvcs=false make race'
+
+      - name: Docker Compose up
+        run: ${{ env.COMPOSE_COMMAND }} up --build -d
+
+      - name: Cleanup
+        if: always()
+        run: |
+          ${{ env.COMPOSE_COMMAND }} down
+          docker compose down && docker compose kill || true 
+          docker compose rm --volumes --stop --force
+
+  terraform-plan:
+    runs-on: team-dev
+    container:
+      image: registry.example.com/tag-docker-prod-federated-us/tag/tag-utilities/tag-terraform:1.6.5
+    steps:
+      - name: Set version
+        run: echo "VERSION=$( echo ${{ github.head_ref }}-${{ github.run_number }} | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9_-]//g')" >> $GITHUB_ENV
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run Terraform Plan
+        uses: example-org/shared-actions/terraform@terraform-v1
+        with:
+          root_module_path: ./deployments/terraform/root-module
+          backend_config_path: ../environments/dev/us-east-1/dev.backend
+          tfvars_path: ../environments/dev/us-east-1/dev.tfvars
+          version: ${{ env.VERSION }}

@@ -1,0 +1,23 @@
+# release-workflow.yaml
+# release-workflow configuration
+
+---
+    name: Release
+
+    on:
+      push:
+        branches: [main]
+      pull_request:
+        types: [opened, synchronize, reopened]
+    
+    jobs:
+      ci:
+        name: CI
+        uses: example-org/shared-actions/.github/workflows/build-service.yaml@build-service-v1
+        with:
+          #trigger_image_push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          #trigger_release_creation: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          trigger_image_push: true
+          trigger_release_creation: true
+        secrets: inherit
+## TODO: CD with ARGOCD workflow

@@ -1,0 +1,119 @@
+#!/bin/bash
+
+echo "Port 2222" >> /etc/ssh/sshd_config
+sudo systemctl restart sshd.service
+mkdir /Docker
+
+# Install docker and docker compose
+sudo amazon-linux-extras install -y docker
+sudo systemctl enable docker
+sudo systemctl start docker
+
+# Overwrite the default Docker subnet configuration
+# The subnet range for our Mongo clusters conflicts with the default range for Docker
+echo '
+{
+  "bip": "192.168.1.5/24",
+  "default-address-pools": [
+    {"base":"192.168.0.0/16","size":24}
+  ]
+}' | sudo tee /etc/docker/daemon.json
+
+# Add the ec2-user to the 'docker' group
+sudo usermod -aG docker ec2-user
+
+# Install docker compose
+sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+sudo chmod +x /usr/local/bin/docker-compose
+
+# users.conf
+echo "username:1234:1001" >> /Docker/users.conf
+echo "coreplatform:password:1002" >> /Docker/users.conf
+echo "coreplatformpartner_a:pass2:1003" >> /Docker/users.conf
+echo "partner_a::1004" >> /Docker/users.conf
+
+# partner_a.pub
+echo "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCdsJddFNKrE6JJL+BfAXS6p3dpwSK1QnpDi6GfFj59DVEGSq27vnDFj5PTP3TkXW9TBXFCSo2OnGQT7EBzKdEb2k92KPpVvibqaWXYGKyEHVRhOTKVfxe5vBrGMUFtCtoZ0Xzp2LNH4F4GF9jgqY1K+yTsHr3c1MS3wQe5gz0v30OITL4xdRGN/s8MEKnDK2Zc11wHHSMjGIfsSkCrVq37fDOmqV6EB9enQHalHiop1r2w4RjHvv6PUuyzOp6htTPM3lUWL9Q92oRYTkNTdtg6cvGg0zUebfLAWfJlbWhjQy2+oxfcxW44OyIgyj3XjgsndkkJNW0sXtjPT+eOV3sfddLxUR93OtqFhYtkgjhlu2F7L47NcoYn5Fxd2/9qolWBNhIoN/BpacKcfuH7ksR3IldIeICc0Lg1qq2+zY9wNZVV2hiT6KwElyc/kOxCqgv3xjuu3dZeXj76e6JVatT99qyfIR1OL+bVIxwETRgKAfPVGaIvIw9gdR1CIc4q1ps= w443293@FINSERV-W700834" >> /Docker/partner_a.pub
+
+# ssh_host_ed25519_key
+# [REDACTED — generate keys at runtime]
+# [REDACTED — generate keys at runtime]
+# [REDACTED — generate keys at runtime]
+# [REDACTED — generate keys at runtime]
+# [REDACTED — generate keys at runtime]
+# [REDACTED — generate keys at runtime]
+# [REDACTED — generate keys at runtime]
+
+# ssh_host_rsa_key
+# [REDACTED — generate keys at runtime]
+# [REDACTED — generate keys at runtime]
+# [REDACTED — generate keys at runtime]
+# [REDACTED — generate keys at runtime]
+# [REDACTED — generate keys at runtime]
+# [REDACTED — generate keys at runtime]
+# [REDACTED — generate keys at runtime]
+# [REDACTED — generate keys at runtime]
+# [REDACTED — generate keys at runtime]
+# [REDACTED — generate keys at runtime]
+# [REDACTED — generate keys at runtime]
+# [REDACTED — generate keys at runtime]
+# [REDACTED — generate keys at runtime]
+# [REDACTED — generate keys at runtime]
+# [REDACTED — generate keys at runtime]
+# [REDACTED — generate keys at runtime]
+# [REDACTED — generate keys at runtime]
+# [REDACTED — generate keys at runtime]
+# [REDACTED — generate keys at runtime]
+# [REDACTED — generate keys at runtime]
+# [REDACTED — generate keys at runtime]
+# [REDACTED — generate keys at runtime]
+# [REDACTED — generate keys at runtime]
+# [REDACTED — generate keys at runtime]
+# [REDACTED — generate keys at runtime]
+# [REDACTED — generate keys at runtime]
+# [REDACTED — generate keys at runtime]
+# [REDACTED — generate keys at runtime]
+# [REDACTED — generate keys at runtime]
+# [REDACTED — generate keys at runtime]
+# [REDACTED — generate keys at runtime]
+# [REDACTED — generate keys at runtime]
+# [REDACTED — generate keys at runtime]
+# [REDACTED — generate keys at runtime]
+# [REDACTED — generate keys at runtime]
+# [REDACTED — generate keys at runtime]
+# [REDACTED — generate keys at runtime]
+# [REDACTED — generate keys at runtime]
+# [REDACTED — generate keys at runtime]
+# [REDACTED — generate keys at runtime]
+# [REDACTED — generate keys at runtime]
+# [REDACTED — generate keys at runtime]
+# [REDACTED — generate keys at runtime]
+# [REDACTED — generate keys at runtime]
+# [REDACTED — generate keys at runtime]
+# [REDACTED — generate keys at runtime]
+# [REDACTED — generate keys at runtime]
+# [REDACTED — generate keys at runtime]
+# [REDACTED — generate keys at runtime]
+echo "" >> /Docker/ssh_host_rsa_key
+
+# init_sftp.sh
+echo "#\!/bin/bash" >> /Docker/init_sftp.sh
+echo "for user_home in /home*//* ; do" >> /Docker/init_sftp.sh
+echo "  if [ -d "\"\$user_home\"" ]; then" >> /Docker/init_sftp.sh
+echo "    username='basename $user_home'" >> /Docker/init_sftp.sh
+echo "    mkdir -p \$user_home/input" >> /Docker/init_sftp.sh
+echo "    chown -R \$username:users \$user_home/input" >> /Docker/init_sftp.sh
+echo "  fi" >> /Docker/init_sftp.sh
+echo "done" >> /Docker/init_sftp.sh
+
+# Dockerfile.sftp
+echo "FROM registry.example.com/atmoz/sftp:alpine" >> /Docker/Dockerfile.sftp
+echo "COPY users.conf /etc/sftp/users.conf" >> Docker/Dockerfile.sftp
+echo "COPY ssh_host_ed25519_key /etc/ssh/ssh_host_ed25519_key" >> Docker/Dockerfile.sftp
+echo "COPY ssh_host_rsa_key /etc/ssh/ssh_host_rsa_key" >> Docker/Dockerfile.sftp
+echo "COPY partner_a.pub /home/partner_a/.ssh/keys/partner_a.pub" >> Docker/Dockerfile.sftp
+echo "COPY init_sftp.sh /etc/sftp/sftp.d/init_sftp.sh" >> Docker/Dockerfile.sftp
+
+cd /Docker
+sudo docker build . -t tag/sftp:latest -f Dockerfile.sftp
+sudo docker run -d -p 22:22 --restart always tag/sftp:latest

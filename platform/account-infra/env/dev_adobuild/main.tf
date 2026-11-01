@@ -1,0 +1,80 @@
+# Locals
+# ===============================================
+locals {
+  fi_name                        = "shrd"
+  fi_short_key                   = "S"
+  ado_agent_fi_list              = "finserv"  # comma delimited list of FIs, e.g., finserv,partner_a
+  environment                    = "dev"
+  region                         = "us-east-1"
+  vpc_id                         = "vpc-0example000000001"
+  account_id                     = "111111111113"
+  
+  ad_directory_name              = "ad.dev.encawsad.test"
+  oupath                         = "OU=Computers,OU=ad,DC=ad,DC=dev,DC=encawsad,DC=test"
+  dnsServerAddresses             = "10.99.82.159,10.99.83.240" # the IP addresses of the VPC DNS servers
+
+  ingress_cidr                   = ["10.0.0.0/8"]
+
+  instance_type                  = "m5.large"
+  volume_size                    = "200"
+
+  ontime_tag                     = "on=(M-F,7);tz=est"
+  offtime_tag                    = "off=(M-F,21);tz=est"
+  patchgroup1                    = "WIN_DEV_0"
+}
+
+
+# Provider
+# ===============================================
+provider "aws" {
+  region = "${local.region}"
+}
+
+
+# Backend
+# ===================================================
+# NOTE: no ${local.interpolation} allowed in Backend!
+# ===================================================
+# Provider versions pinned to minor — patch updates auto-applied, breaking changes blocked
+terraform {
+  # Remote state with S3 + DynamoDB locking. State encryption enabled at bucket level.
+  backend "s3" {
+    bucket = "finserv-coreplatform-tfstates"
+    key    = "coreplatform-account-infrastructure/dev_adobuild/terraform.tfstate"
+    region = "us-east-1"
+  }
+}
+
+
+# Core Modules
+# ===============================================
+# Shared module — changes here affect all consumers. Semver applies.
+# Module sourced from internal registry — pin version to prevent unexpected changes
+module "coreplatform_adobuild" {
+  source = "../../modules/coreplatform-adobuild"
+
+  account_infra_state_bucket  = "finserv-coreplatform-tfstates"
+  account_infra_state_key     = "coreplatform-account-infrastructure/${local.environment}/terraform.tfstate"
+  account_infra_state_region  = "${local.region}"
+
+  dns_domain                  = "${local.ad_directory_name}"
+  oupath                      = "${local.oupath}"
+  dnsServerAddresses          = "${local.dnsServerAddresses}"
+
+  region                      = "${local.region}"
+  vpc_id                      = "${local.vpc_id}"
+  environment                 = "${local.environment}"
+  fi_name                     = "${local.fi_name}"
+  fi_short_key                = "${local.fi_short_key}"
+  ado_agent_fi_list           = "${local.ado_agent_fi_list}"
+  ebs_kms_alias               = "alias/coreplatform-${local.environment}-ue1-ebs-kms-key"
+  account_id                  = "${local.account_id}"
+  
+  key_name                    = "coreplatform-${local.environment}"
+  instance_type               = "${local.instance_type}"
+  volume_size                 = "${local.volume_size}"
+  ec2on_tag                   = "${local.ontime_tag}"
+  ec2off_tag                  = "${local.offtime_tag}"
+  patchgroup1                 = "${local.patchgroup1}"
+  ingress_cidr                = "${local.ingress_cidr}"
+}

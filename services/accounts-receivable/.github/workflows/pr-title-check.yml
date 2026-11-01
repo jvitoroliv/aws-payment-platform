@@ -1,0 +1,35 @@
+# pr-title-check.yml
+# pr-title-check configuration
+
+name: "PR Title Check"
+on:
+  pull_request:
+    types: [opened, edited, synchronize]
+jobs:
+  check-title:
+    runs-on: [self-hosted, linux, x64]
+    steps:
+    - name: Check PR title
+      uses: actions/github-script@v7
+      with:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        script: |
+          // The pattern for JIRA ticket format
+          const JIRA_PATTERN = /^TAG-\d+/
+
+          // The pattern for bot users
+          const BOT_USER = /\[bot\]$/
+
+          if (BOT_USER.test(context.payload.pull_request.user.login)) 
+          {
+            console.log('The PR was created by a bot, so not checking the PR title.')
+          } 
+          else if (!JIRA_PATTERN.test(context.payload.pull_request.title)) 
+          {
+            // Fails the workflow
+            core.setFailed('PR title does not match JIRA ticket format! It must be `TAG-{number} {Title}`')
+          } 
+          else 
+          {
+            console.log('PR title format is correct.')
+          }

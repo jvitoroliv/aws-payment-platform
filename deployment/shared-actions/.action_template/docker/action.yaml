@@ -1,0 +1,23 @@
+# action.yaml
+# action configuration
+# Maintained by: Platform Engineering
+
+# action.yaml — action configuration
+
+---
+name: '$action_name'
+description: |
+  $action_description
+
+inputs:
+  named_input:
+    description: 'Some input that is named'
+    required: true
+
+runs:
+  using: 'docker'
+  image: 'Dockerfile'
+  env:
+    NAMED_INPUT: ${{ inputs.named_input }}
+  args:
+    - ${{ inputs.named_input}}

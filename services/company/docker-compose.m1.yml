@@ -1,0 +1,30 @@
+# docker-compose.m1.yml
+# local development environment
+
+services:
+  company-producer:
+    platform: linux/amd64 # Runs the container in emulation mode to support M1 architecture
+
+  kafka:
+    platform: linux/amd64
+
+  karapace-registry:
+    platform: linux/amd64
+
+  tester:
+    platform: linux/amd64
+
+  schema-uploader:
+    platform: linux/amd64
+
+  canary-consumer-v1:
+    platform: linux/amd64
+
+  canary-consumer-v2:
+    platform: linux/amd64
+
+  canary-consumer-v3:
+    platform: linux/amd64
+
+  canary-consumer-v4:
+    platform: linux/amd64

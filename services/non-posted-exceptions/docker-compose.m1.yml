@@ -1,0 +1,13 @@
+# docker-compose.m1.yml — local development environment
+
+---
+services:
+  exception-producer:
+    # Runs the container in emulation mode to support M1 architecture
+    platform: linux/amd64
+
+  kafka:
+    platform: linux/amd64
+
+  karapace-registry:
+    platform: linux/amd64

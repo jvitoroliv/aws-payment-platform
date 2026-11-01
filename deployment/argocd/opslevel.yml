@@ -1,0 +1,37 @@
+# opslevel.yml
+# opslevel configuration
+
+---
+version: 1
+service:
+  name: tag-platform-app-of-apps
+  lifecycle: pre-alpha
+  tier: tier_4
+  product: Unknown
+  owner: tag-devops
+  language: other
+  framework: other
+  description: tag app of apps repository
+  aliases:
+    - example-org/tag-platform-app-of-apps
+  repositories:
+    - name: example-org/tag-platform-app-of-apps
+      path: "/"
+      provider: github
+  tools:
+    - name: DeepSource
+      category: code
+      url: https://app.deepsource.com/gh/example-org/tag-platform-app-of-apps
+  dependencies: []
+  tags:
+    - key: containerized
+      value: no
+    - key: pci
+      value: no
+    - key: scope
+      value: internal
+    - key: tag1
+      value: value1
+    - key: type
+      value: devops
+    

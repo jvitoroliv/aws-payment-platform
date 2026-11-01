@@ -1,0 +1,215 @@
+# JobBinariesBuild.yaml — build pipeline
+
+# JobBinariesBuild.yaml — build pipeline
+
+name: $(date:yyyyMMdd).$(BuildId)
+
+trigger: none
+
+resources:
+  repositories:
+    - repository: placeholder
+      type: github
+      endpoint: example-org
+      name: example-org/placeholder
+
+variables:
+  - group: Octopus
+  - group: CpAWS-PrimaryRegion
+  - name: Configuration
+    value: Release
+    
+# Variable 'BuildAll' is defined in the UI because it is settable at queue time
+    
+stages:
+- stage: JobBinaries_Build
+  jobs:
+  - job: JobBinaries_Build_Job
+    displayName: JobBinaries Build Job
+    pool:
+      name: CpAWS-Central
+      demands: msbuild
+    workspace:
+      clean: all
+    steps:
+    - task: MSBuild@1
+      displayName: DeleteWorkFolder
+      inputs:
+        solution: 'Enc_DeleteWorkFolder.proj'
+        platform: 'Any CPU'
+        configuration: '$(Configuration)'
+    
+    - task: MSBuild@1
+      displayName: CreateVersionFile
+      inputs:
+        solution: CreateVersionFile.proj
+        platform: 'Any CPU'
+        configuration: '$(Configuration)'
+    
+    - task: MSBuild@1
+      displayName: BuildTransforms
+      inputs:
+        solution: 'Enc_BuildTransforms.proj'
+        platform: 'Any CPU'
+        configuration: '$(Configuration)'
+    
+    - task: MSBuild@1
+      displayName: 'Build JobBinaries'
+      inputs:
+        solution: 'Enc_BuildJobBinaries.proj'
+        platform: 'Any CPU'
+        configuration: '$(Configuration)'
+    
+    - powershell: |
+       $buildinfo = @{ BuildNumber="$(Build.BuildNumber)"; SourceBranch="$(Channel)" }
+       $buildinfo # show to verify
+       $buildinfo | ConvertTo-Json | Out-File "$(Build.SourcesDirectory)\BuildInfo.json"
+       
+      displayName: 'Save BuildInfo to file'
+    
+    - task: PublishBuildArtifacts@1
+      displayName: 'Push BuildInfo file to artifacts'
+      inputs:
+        PathtoPublish: '$(Build.SourcesDirectory)\BuildInfo.json'
+        ArtifactName: BuildInfo
+    
+    - task: PublishBuildArtifacts@1
+      displayName: 'Push DeploymentScripts to artifacts'
+      inputs:
+        PathtoPublish: '$(Build.SourcesDirectory)\deployment\scripts\'
+        ArtifactName: DeploymentScripts
+    
+    - task: PublishBuildArtifacts@1
+      displayName: 'Push Nuget to artifacts'
+      inputs:
+        PathtoPublish: '$(Build.SourcesDirectory)\src\Tools\Nuget\'
+        ArtifactName: NuGet
+    
+    - task: PublishBuildArtifacts@1
+      displayName: 'Push Octo to artifacts'
+      inputs:
+        PathtoPublish: '$(Build.SourcesDirectory)\src\Tools\Octopus\'
+        ArtifactName: Octo
+    
+    - task: PublishBuildArtifacts@1
+      displayName: 'Push General Artifacts'
+      inputs:
+        PathtoPublish: '$(Build.SourcesDirectory)\Work\$(Configuration)\Artifacts\'
+        ArtifactName: General
+    
+    - task: PublishBuildArtifacts@1
+      displayName: 'Push CoreServiceVersion to artifacts'
+      inputs:
+        PathtoPublish: '$(Build.SourcesDirectory)\_CoreServiceVersion.txt'
+        ArtifactName: CoreServiceVersion
+    
+    - task: PublishBuildArtifacts@1
+      displayName: 'Push TaskManagement Artifacts'
+      inputs:
+        PathtoPublish: '$(Build.SourcesDirectory)\Work\$(Configuration)\JMArtifacts\'
+        ArtifactName: TaskManagement
+        
+- stage: JobBinaries_Build_OnPrem
+  jobs:
+  - job: JobBinaries_Build_OnPrem_Job
+    displayName: JobBinaries Build OnPrem Job
+    pool:
+      name: CoreService-Code-Deploy
+    workspace:
+      clean: all
+    steps:    
+    - checkout: placeholder
+      clean: true
+
+    - powershell: |
+       $nugetpath = "$(Pipeline.Workspace)\NuGetFiles\"
+       If (Test-Path -Path $nugetpath) {
+         Remove-Item -path "$nugetpath" -Recurse
+       }
+       New-Item -Path "$(Pipeline.Workspace)" -Name "NuGetFiles" -ItemType "directory"
+       
+      displayName: 'Delete Nupkg folder'
+    
+    - task: DownloadPipelineArtifact@2
+      displayName: 'Download BuildInfo Artifacts'
+      inputs:
+        source: current
+        artifact: BuildInfo
+        path: $(System.ArtifactsDirectory)\BuildInfo
+   
+    - task: DownloadPipelineArtifact@2
+      displayName: 'Download Version Artifacts'
+      inputs:
+        source: current
+        artifact: CoreServiceVersion
+        path: $(System.ArtifactsDirectory)\CoreServiceVersion
+    
+    - powershell: |
+       $VersionPath = "$(System.ArtifactsDirectory)\CoreServiceVersion"
+       $BuildInfoPath = "$(System.ArtifactsDirectory)\BuildInfo"
+       
+       $version = Get-Content "${VersionPath}\_CoreServiceVersion.txt"
+       
+       $buildinfo = Get-Content "${BuildInfoPath}\BuildInfo.json" | Out-String | ConvertFrom-Json
+       $channel = $buildinfo.SourceBranch
+       $buildnumber = $buildinfo.BuildNumber
+       
+       $semver = "${version}-${channel}${buildnumber}"
+       
+       
+       Write-Host "Version = $version"
+       Write-Host "Channel = $channel"
+       Write-Host "BuildNumber = $buildnumber"
+       Write-Host ""
+       Write-Host "SemVer = $semver"
+       
+       
+      displayName: 'Version and BuildInfo'
+    
+    - task: DownloadPipelineArtifact@2
+      displayName: 'Download DeploymentScripts Artifacts'
+      inputs:
+        source: current
+        artifact: DeploymentScripts
+        path: $(System.ArtifactsDirectory)\DeploymentScripts
+    
+    - task: DownloadPipelineArtifact@2
+      displayName: 'Download NuGet Artifacts'
+      inputs:
+        source: current
+        artifact: NuGet
+        path: $(System.ArtifactsDirectory)\NuGet
+    
+    - task: DownloadPipelineArtifact@2
+      displayName: 'Download Octo Artifacts'
+      inputs:
+        source: current
+        artifact: Octo
+        path: $(System.ArtifactsDirectory)\Octo
+    
+    - task: DownloadPipelineArtifact@2
+      displayName: 'Download TaskManagement Artifacts'
+      inputs:
+        source: current
+        artifact: TaskManagement
+        path: $(System.ArtifactsDirectory)\TaskManagement
+    
+    - task: PowerShell@2
+      displayName: 'NuGet TaskManagement files'
+      inputs:
+        targetType: filePath
+        filePath: '$(System.ArtifactsDirectory)\DeploymentScripts\OnPrem-CreateNugetFiles.ps1'
+        arguments: '"$(System.ArtifactsDirectory)\TaskManagement" "$(Pipeline.Workspace)\NuGetFiles" "TaskManagement.JobBinaries:TaskManagement_JobBinaries,TaskManagement.PreProcVars:TaskManagement_PreProcVars,TaskManagement.JobConfig:TaskManager_BatchConfiguration" "$(System.ArtifactsDirectory)\NuGet"'
+    
+    - task: CopyFiles@2
+      displayName: 'Copy Nupkgs to Octopus'
+      inputs:
+        SourceFolder: '$(Pipeline.Workspace)\NuGetFiles\'
+        TargetFolder: '$(OctopusFeed)'
+    
+    - task: PowerShell@2
+      displayName: 'Create Octopus Releases'
+      inputs:
+        targetType: filePath
+        filePath: '$(System.ArtifactsDirectory)\DeploymentScripts\OnPrem-CreateOctopusReleases.ps1'
+        arguments: '"$(System.ArtifactsDirectory)\BuildInfo" "$(System.ArtifactsDirectory)\CoreServiceVersion" "$(System.ArtifactsDirectory)\Octo"'

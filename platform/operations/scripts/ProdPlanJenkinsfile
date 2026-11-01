@@ -1,0 +1,64 @@
+#!groovy
+
+properties(
+        [
+                ([
+                        $class       : 'DatadogJobProperty',
+                        tagProperties: "jenkins.job.duration,jenkins.job.status"
+                ])
+        ]
+)
+
+node("prod") {
+    stage('Plan') {
+        ansiColor('xterm') {
+            try {
+                checkout scm
+                env.AWS_DEFAULT_REGION = "us-east-1"
+                env.ENVIRONMENT = 'prod'
+
+                def tfContainer = docker.image("hashicorp/terraform:1.6.5")
+
+                tfContainer.inside("-e TF_VAR_mock-service_version=latest --entrypoint=''") {
+
+                    stage('Plan') {
+                        dir("terraform/environments/${env.ENVIRONMENT}/global") {
+                            sh "terraform init -reconfigure -backend-config=${env.ENVIRONMENT}.backend"
+                            sh "terraform plan -out=planfile"
+                        }
+
+                        dir("terraform/tag_core") {
+                            sh "terraform init -reconfigure -backend-config=../environments/${env.ENVIRONMENT}/us-east-1/${env.ENVIRONMENT}.backend"
+                            sh "terraform plan --var-file=../environments/${env.ENVIRONMENT}/us-east-1/${env.ENVIRONMENT}.tfvars -out=planfile"
+                        }
+
+                        dir("terraform/tag_core") {
+                            sh "terraform init -reconfigure -backend-config=../environments/${env.ENVIRONMENT}/us-west-2/${env.ENVIRONMENT}.backend"
+                            sh "terraform plan --var-file=../environments/${env.ENVIRONMENT}/us-west-2/${env.ENVIRONMENT}.tfvars -out=planfile"
+                        }
+                    }
+                }
+                notifySlack("pass")
+            } catch (Exception e) {
+                notifySlack("fail")
+                currentBuild.result = 'FAILURE'
+            }
+        }
+    }
+}
+
+def notifySlack(String Outcome) {
+    def channel = "#tag-pipeline-notifications"
+    def color = ""
+    def msg = ""
+
+    if (Outcome == "pass") { 
+        color = '#B200FF'
+        msg = "Success \n\n  the prod plan ${BUILD_TIMESTAMP} completed \n\n ${env.BUILD_URL}"
+    } else {
+        color = '#E88409'
+        msg = "Fail \n\n  the prod plan ${BUILD_TIMESTAMP} failed \n\n ${env.BUILD_URL}"
+    }
+
+    slackSend(channel: channel, color: color, message: msg)
+}

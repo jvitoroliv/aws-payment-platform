@@ -1,0 +1,16 @@
+# docker-compose-mongo.yml — local development environment
+
+# docker-compose-mongo.yml — local development environment
+
+services:
+  mongo:
+    image: public.ecr.aws/docker/library/mongo:7.0
+    container_name: payment-service-mongo
+    ports:
+      - "27017:27017"
+    networks:
+      - local
+
+networks:
+  local:
+    name: payment-service-local

@@ -1,0 +1,45 @@
+# ps-tag-payment-scheduler.yaml
+# ps-tag-payment-scheduler configuration
+
+apiVersion: argoproj.io/v1alpha1
+# ArgoCD Application — watches the Git source and reconciles on change.
+kind: Application
+metadata:
+  name: ps-tag-payment-scheduler
+  namespace: tag-dev # <fabric-id>-<env>
+  labels:
+    fabric.example.com/fabric-id: tag
+    # GitHub Environment — enables deployment protection rules and secrets scoping
+    fabric.example.com/environment: dev
+  annotations:
+    argocd.argoproj.io/manifest-generate-paths: .
+spec:
+  project: tag-dev-k8s # <fabric-id>-<env>-k8s
+
+  # Source of the application manifests
+  source:
+    repoURL: https://github.com/example-org/tag-platform-app-of-apps.git
+    targetRevision: PROJ-13421
+    path: applications/dev/ps-tag-payment-scheduler
+    helm:
+      valueFiles:
+        - values.yaml
+
+  # Destination cluster and namespace to deploy the application
+  destination:
+    # Target cluster name. Format is <fabric-id>-<env>-<region>.
+    name: tag-dev-us-east-1 # If you have a name defined in the fabric_k8s resource the format is <fabric-id>-<name>-<env>-<region>
+    namespace: ps-tag-payment-scheduler
+
+  # Sync policy
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      allowEmpty: true
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+      - PruneLast=true
+      - RespectIgnoreDifferences=true
+      - ApplyOutOfSyncOnly=true

@@ -1,0 +1,20 @@
+{
+    "extends": "recommended",
+    "rules": {
+        "CatchException": {
+            "enabled": false
+        },
+        "VariableTypeRequired": {
+            "enabled": false
+        },
+        "VariableName": {
+            "enabled": false
+        },
+        "LineLength": {
+            "enabled": false
+        },
+        "size.NestedBlockDepth": {
+            "maxNestedBlockDepth": 7
+        }
+    }
+}

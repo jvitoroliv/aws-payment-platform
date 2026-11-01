@@ -1,0 +1,40 @@
+#!groovy
+
+properties(
+        [
+                parameters([
+                        string(defaultValue: '0.0.1', name: 'SEMANTIC_VERSION')
+                ]),
+                ([
+                        $class       : 'DatadogJobProperty',
+                        tagProperties: "jenkins.job.duration,jenkins.job.status"
+                ])
+        ]
+)
+
+disableConcurrentBuilds()
+
+node("dev") {
+    stage ('Test') {
+        checkout scm
+        withDockerRegistry(credentialsId: 'tag-devops-cloud-artifactory-creds', url: 'https://registry.example.io/') {
+            docker.image("registry.example.io/docker-prod/app/tag-utilities/builder:1.21.3").inside("-u root") {
+                sh 'go mod vendor'
+                sh 'go test ./log'
+            }
+        }
+    }
+
+    stage ('Create Git Tag') {
+        withCredentials([string(credentialsId: 'jenkins-default-GitHub-Token-example-org-secret-text', variable: 'GIT_API_TOKEN')]) {
+            sh "git config user.name 'Jenkins'"
+            sh "git config user.email 'user@example-company.com'"
+            sh "git tag -a v${params.SEMANTIC_VERSION} -m 'Log version ${params.SEMANTIC_VERSION}'"
+            sh "git push https://${GIT_API_TOKEN}@github.com/example-org/${determineRepoName()}.git v${params.SEMANTIC_VERSION}"
+        }
+    }
+}
+
+String determineRepoName() {
+    return scm.getUserRemoteConfigs()[0].getUrl().tokenize('/').last().split("\\.")[0]
+}

@@ -1,0 +1,47 @@
+# ps-tag-clearing.yaml
+# ps-tag-clearing configuration
+# Maintained by: Platform Engineering
+
+# ps-tag-clearing.yaml — ps-tag-clearing configuration
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ps-tag-clearing
+  namespace: tag-dev # <fabric-id>-<env>
+  labels:
+    fabric.example.com/fabric-id: tag
+    # GitHub Environment — enables deployment protection rules and secrets scoping
+    fabric.example.com/environment: dev
+  annotations:
+    argocd.argoproj.io/manifest-generate-paths: .
+spec:
+  project: tag-dev-k8s # <fabric-id>-<env>-k8s
+
+  # Source of the application manifests
+  source:
+    repoURL: https://github.com/example-org/tag-platform-app-of-apps.git
+    targetRevision: tag-12455
+    path: applications/dev/ps-tag-clearing
+    helm:
+      valueFiles:
+        - values.yaml
+
+  # Destination cluster and namespace to deploy the application
+  destination:
+    # Target cluster name. Format is <fabric-id>-<env>-<region>.
+    name: tag-dev-us-east-1 # If you have a name defined in the fabric_k8s resource the format is <fabric-id>-<name>-<env>-<region>
+    namespace: ps-tag-clearing
+
+  # Sync policy
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      allowEmpty: true
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+      - PruneLast=true
+      - RespectIgnoreDifferences=true
+      - ApplyOutOfSyncOnly=true

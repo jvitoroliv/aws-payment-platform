@@ -1,0 +1,174 @@
+{
+    "title": "TAG - VPC Flow Logs - Blocked Requests",
+    "description": "",
+    "inputs": {
+        "input_blk2yvBS": {
+            "options": {
+                "defaultValue": "client_source",
+                "items": [
+                    {
+                        "label": "Source Name",
+                        "value": "client_source"
+                    },
+                    {
+                        "label": "Source Name, Destination IP",
+                        "value": "client_dest"
+                    },
+                    {
+                        "label": "Source Name, Source IP, Destination IP",
+                        "value": "client_src_dest"
+                    }
+                ],
+                "token": "dd_group_by"
+            },
+            "title": "Group By",
+            "type": "input.dropdown"
+        },
+        "input_gSlJrU0F": {
+            "options": {
+                "defaultValue": "\"10.99.216.0/22\", \"10.99.220.0/22\"",
+                "items": [
+                    {
+                        "label": "Dev",
+                        "value": "\"10.99.192.0/22\", \"10.99.200.0/22\""
+                    },
+                    {
+                        "label": "Test",
+                        "value": "\"10.99.196.0/22\", \"10.99.204.0/22\""
+                    },
+                    {
+                        "label": "Stage",
+                        "value": "\"10.102.124.0/22\", \"10.103.80.0/22\""
+                    },
+                    {
+                        "label": "Prod",
+                        "value": "\"10.99.216.0/22\", \"10.99.220.0/22\""
+                    }
+                ],
+                "token": "dd_environment"
+            },
+            "title": "Environment",
+            "type": "input.dropdown"
+        },
+        "input_global_trp": {
+            "options": {
+                "defaultValue": "-24h@h,now",
+                "token": "global_time"
+            },
+            "title": "Global Time Range",
+            "type": "input.timerange"
+        },
+        "input_vuSGmAdq": {
+            "options": {
+                "defaultValue": "\"Unknown*\"",
+                "items": [
+                    {
+                        "label": "Known Sources Only",
+                        "value": "\"Unknown*\""
+                    },
+                    {
+                        "label": "All Sources",
+                        "value": "\"\""
+                    }
+                ],
+                "token": "dd_sources"
+            },
+            "title": "Sources",
+            "type": "input.dropdown"
+        },
+        "input_yMdPDlLP": {
+            "options": {
+                "defaultValue": "*",
+                "token": "text_filter_sources"
+            },
+            "title": "Filter Sources",
+            "type": "input.text"
+        }
+    },
+    "defaults": {
+        "dataSources": {
+            "ds.search": {
+                "options": {
+                    "queryParameters": {
+                        "earliest": "$global_time.earliest$",
+                        "latest": "$global_time.latest$"
+                    }
+                }
+            }
+        },
+        "tokens": {
+            "default": {
+                "unknown_sources": {
+                    "value": "\"Unknown*\""
+                }
+            }
+        },
+        "visualizations": {
+            "global": {
+                "showProgressBar": true
+            }
+        }
+    },
+    "visualizations": {
+        "viz_ZpobfjnN": {
+            "dataSources": {
+                "primary": "ds_uczPLixR"
+            },
+            "options": {
+                "xAxisLabelVisibility": "show",
+                "xAxisTitleVisibility": "hide",
+                "yAxisLabelVisibility": "hide",
+                "yAxisTitleVisibility": "hide"
+            },
+            "type": "splunk.line"
+        }
+    },
+    "dataSources": {
+        "ds_uczPLixR": {
+            "name": "Search_1",
+            "options": {
+                "query": "index=corp_prod_aws_vpcflow action=\"blocked\"\n| search dest IN ($dd_environment$)\n| eval client_ip = src\n| eval client_source = case(\n{{CIDRMATCH_SECTION}}\n)\n| search client_source=\"$text_filter_sources$\"\n| search client_source!=$dd_sources$\n| eval client_dest=client_source + \" - \" + dest_ip\n| eval client_src_dest=client_source + \" - \" +src_ip + \" - \" + dest_ip\n| timechart limit=0 count by $dd_group_by$"
+            },
+            "type": "ds.search"
+        }
+    },
+    "layout": {
+        "globalInputs": [
+            "input_global_trp",
+            "input_gSlJrU0F",
+            "input_vuSGmAdq",
+            "input_blk2yvBS",
+            "input_yMdPDlLP"
+        ],
+        "layoutDefinitions": {
+            "layout_1": {
+                "options": {
+                    "height": 960,
+                    "width": 1440
+                },
+                "structure": [
+                    {
+                        "item": "viz_ZpobfjnN",
+                        "position": {
+                            "h": 400,
+                            "w": 1440,
+                            "x": 0,
+                            "y": 0
+                        },
+                        "type": "block"
+                    }
+                ],
+                "type": "grid"
+            }
+        },
+        "options": {},
+        "tabs": {
+            "items": [
+                {
+                    "label": "New tab",
+                    "layoutId": "layout_1"
+                }
+            ]
+        }
+    }
+}

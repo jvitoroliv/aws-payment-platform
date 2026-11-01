@@ -1,0 +1,1 @@
+[![Build Status](https://ci.apps.example.com/buildStatus/icon?job=ExampleOrg+Merge%2fshared-terraform%2fmaster)](https://ci.apps.example.com/job/ExampleOrg%20Merge/job/shared-terraform/job/master/)

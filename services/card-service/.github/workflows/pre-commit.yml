@@ -1,0 +1,22 @@
+# pre-commit.yml
+# pre-commit configuration
+
+---
+name: pre-commit
+
+on:
+    pull_request:
+    push:
+        branches: [main]
+
+jobs:
+    pre-commit:
+        runs-on: [self-hosted, tag-dev]
+        steps:
+            - uses: actions/checkout@v3
+            - uses: actions/setup-python@v3
+              with:
+                python-version: '3.10'
+            - uses: pre-commit/action@v3.0.1
+              with:
+                extra_args: --config .pre-commit-config.yml

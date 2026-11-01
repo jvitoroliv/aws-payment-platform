@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "1.2",
+  "description": "Domain join instances in associated ASGs.",
+  "runtimeConfig": {
+    "aws:domainJoin": {
+      "properties": {
+        "directoryId": "${directory_id}",
+        "directoryName": "${directory_name}",
+        "directoryOU": "${ec2_ssm_domain_join_ou}",
+        "dnsIpAddresses": [
+          "${primary_dns}",
+          "${secondary_dns}"
+        ]
+      }
+    }
+  }
+}

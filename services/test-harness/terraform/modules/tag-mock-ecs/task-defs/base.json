@@ -1,0 +1,190 @@
+[
+  {
+    "name": "${th_name}",
+    "image": "${th_image}",
+    "repositoryCredentials": {
+      "credentialsParameter": "${artifactory_arn}"
+    },
+    "cpu": ${cpu},
+    "memory": ${memory},
+    "essential": true,
+    "portMappings": [
+      {
+        "protocol": "tcp",
+        "containerPort": 6660,
+        "hostPort": 6660
+      }
+    ],
+    "logConfiguration": {
+      "logDriver": "awslogs",
+      "options": {
+        "awslogs-group": "${th_logs_group}",
+        "awslogs-region": "${region}",
+        "awslogs-stream-prefix": "fargate"
+      }
+    },
+    "environment": [
+      {
+        "name": "FLAGS",
+        "value": "${th_flags}"
+      }
+    ],
+    "dependsOn": [
+      {
+        "containerName": "datadog",
+        "condition": "START"
+      }
+    ],
+    "mountPoints": [
+    ],
+    "systemControls": [
+    ],
+    "volumesFrom": [
+    ]
+  },
+  {
+    "name": "${coreplatform_name}",
+    "image": "${coreplatform_image}",
+    "repositoryCredentials": {
+      "credentialsParameter": "${artifactory_arn}"
+    },
+    "cpu": ${cpu},
+    "memory": ${memory},
+    "essential": true,
+    "portMappings": [
+      {
+        "protocol": "tcp",
+        "containerPort": 9090,
+        "hostPort": 9090
+      }
+    ],
+    "logConfiguration": {
+      "logDriver": "awslogs",
+      "options": {
+        "awslogs-group": "${coreplatform_logs_group}",
+        "awslogs-region": "${region}",
+        "awslogs-stream-prefix": "fargate"
+      }
+    },
+    "environment": [
+      {
+        "name": "FLAGS",
+        "value": "${coreplatform_flags}"
+      }
+    ],
+    "dependsOn": [
+      {
+        "containerName": "datadog",
+        "condition": "START"
+      }
+    ],
+    "mountPoints": [
+    ],
+    "systemControls": [
+    ],
+    "volumesFrom": [
+    ]
+  },
+  {
+    "name": "${chronos_name}",
+    "image": "${chronos_image}",
+    "repositoryCredentials": {
+      "credentialsParameter": "${artifactory_arn}"
+    },
+    "cpu": ${cpu},
+    "memory": ${memory},
+    "essential": true,
+    "portMappings": [
+      {
+        "protocol": "tcp",
+        "containerPort": 9096,
+        "hostPort": 9096
+      }
+    ],
+    "logConfiguration": {
+      "logDriver": "awslogs",
+      "options": {
+        "awslogs-group": "${chronos_logs_group}",
+        "awslogs-region": "${region}",
+        "awslogs-stream-prefix": "fargate"
+      }
+    },
+    "dependsOn": [
+      {
+        "containerName": "datadog",
+        "condition": "START"
+      }
+    ],
+    "environment": [
+    ],
+    "mountPoints": [
+    ],
+    "systemControls": [
+    ],
+    "volumesFrom": [
+    ]
+  },
+  {
+    "name": "datadog",
+    "image": "${datadog_image}",
+    "repositoryCredentials": {
+      "credentialsParameter": "${artifactory_arn}"
+    },
+    "cpu": 256,
+    "memory": 512,
+    "essential": true,
+    "portMappings": [
+      {
+        "protocol": "udp",
+        "containerPort": 8125,
+        "hostPort": 8125
+      }
+    ],
+    "logConfiguration": {
+      "logDriver": "awslogs",
+      "options": {
+        "awslogs-group": "${datadog_logs_group}",
+        "awslogs-region": "${region}",
+        "awslogs-stream-prefix": "fargate"
+      }
+    },
+    "environment": [
+      {
+        "name": "ECS_FARGATE",
+        "value": "true"
+      },
+      {
+        "name": "ENVIRONMENT",
+        "value": "${environment}"
+      },
+      {
+        "name": "environment",
+        "value": "${environment}"
+      },
+      {
+        "name": "DD_DOGSTATSD_NON_LOCAL_TRAFFIC",
+        "value": "true"
+      },
+      {
+        "name": "DD_DOGSTATSD_TAGS",
+        "value": "[\"environment:${environment}\", \"fargate:true\", \"kayleighrox:true\"]"
+      },
+      {
+        "name": "DD_TAGS",
+        "value": "environment:${environment} fargate:true"
+      }
+    ],
+    "secrets": [
+      {
+        "name": "DD_API_KEY",
+        "valueFrom": "${dd_api_key_arn}"
+      }
+    ],
+    "mountPoints": [
+    ],
+    "systemControls": [
+    ],
+    "volumesFrom": [
+    ]
+  }
+]

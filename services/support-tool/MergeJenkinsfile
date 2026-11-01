@@ -1,0 +1,121 @@
+node('test') {
+
+    stage('Get Region') {
+        try {
+            timeout(time: 1, unit: 'HOURS') {
+                notifySlack("Setting Composition", "please approve || timeout in 1hr")
+                script {
+                    def userInput = input(id: 'userInput', message: 'Region...',
+                            parameters: [[$class     : 'ChoiceParameterDefinition',
+                                          description: 'Region',
+                                          name       : 'Region',
+                                          choices    : "us-east-1\nus-west-2"]
+                            ])
+
+                    env.REGION = userInput
+                }
+            }
+        } catch (e) {
+            println(e)
+        }
+    }
+
+    stage('Checkout'){
+        checkout scm
+    }
+
+    stage('Prepare') {
+        buildName "${env.BUILD_NUMBER}) ${env.CHANGE_BRANCH}"
+        buildDescription "${env.CHANGE_BRANCH} => ${env.CHANGE_TARGET}. \nChange Author: ${env.CHANGE_AUTHOR_EMAIL}"
+        env.MOCK_SERVICE_VERSION="${env.BRANCH_NAME}-${env.BUILD_NUMBER}"
+    }
+
+    stage('Test && Build') {
+        parallel Web: {
+            try {
+                buildContainer = docker.image('node:12').inside("-u root -e CHROME_BIN=/usr/bin/chromium") {
+                    dir("${env.WORKSPACE}/web") {
+                        sh 'echo 🏗 Building️ 🐳'
+                        sh './build_web.sh'
+                    }
+                }
+            } catch (e) {
+                currentBuild.result = 'FAILURE'
+                println e.toString()
+                notifySlack(currentBuild.result, "Failed on Build Web")
+            }
+        },
+                Api: {
+                    try {
+                        buildContainer = docker.image('golang:1.12-stretch').inside("-u root") {
+                            dir("${env.WORKSPACE}/go_api") {
+                                sh 'make test'
+                                sh 'make install'
+                            }
+                        }
+                        dir("${env.WORKSPACE}/go_api") {
+                            sh 'echo 🏗 Building️ 🐳'
+                            sh "docker build . --tag registry.apps.example.com/tag/the-support-tool"
+                        }
+                    } catch (e) {
+                        currentBuild.result = 'FAILURE'
+                        println e.toString()
+                        notifySlack(currentBuild.result, "Failed on Build API")
+                    }
+                }
+    }
+
+    stage('Deploy') {
+        parallel Web: {
+            try {
+                    dir("${env.WORKSPACE}/web") {
+                        sh 'echo 🚀 releasing'
+                        sh './deploy_site.sh'
+                    }
+            } catch (e) {
+                currentBuild.result = 'FAILURE'
+                println e.toString()
+                notifySlack(currentBuild.result, "Deploy Web Failed", "Failure see logs")
+            }
+        },       Api: {
+            try {
+                withDockerRegistry(credentialsId: 'TAG_DTR_API_TOKEN', url: 'https://registry.apps.example.com') {
+                    sh 'echo pushing️ 🐳'
+                    sh "docker push registry.apps.example.com/tag/the-support-tool"
+                    dir("${env.WORKSPACE}/go_api") {
+                        sh 'echo 🚀 releasing'
+                        sh "./release.sh ${env.REGION}"
+                    }
+                }
+            } catch (e) {
+                currentBuild.result = 'FAILURE'
+                println e.toString()
+                notifySlack(currentBuild.result, "Deploy API Failed" ,"Failure see logs")
+            } finally {
+                notifySlack(currentBuild.result, "Cleanup" ,"Done with SupportToolMerge Bye.")
+            }
+        }
+    }
+}
+
+def notifySlack(String buildStatus = 'STARTED', String stage, String extra) {
+    // Build status of null means success.
+    buildStatus = buildStatus ?: 'SUCCESS'
+
+    def color
+    def channel = "#tag-notifications"
+
+    if (buildStatus == 'STARTED') {
+        color = '#D4DADF'
+    } else if (buildStatus == 'SUCCESS') {
+        color = '#BDFFC3'
+    } else if (buildStatus == 'UNSTABLE') {
+        color = '#FFFE89'
+    } else {
+        color = '#FF9FA1'
+    }
+
+    def msg = "${buildStatus}: Stage:`${stage}` `${env.JOB_NAME}` #${env.BUILD_NUMBER}:\n${env.BUILD_URL} -- ${extra}"
+
+    slackSend(channel: channel, color: color, message: msg)
+}

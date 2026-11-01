@@ -1,0 +1,5 @@
+    encrypt        = true
+    bucket         = "corp-prod-terraform-state-store-us-west-2"
+    dynamodb_table = "tag-prod-state-store"
+    key            = "stage-accounts-receivable.tfstate"
+    region         = "us-west-2"

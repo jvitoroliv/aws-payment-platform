@@ -1,0 +1,41 @@
+# release-workflow.yml
+# release-workflow configuration
+
+---
+name: Release
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  ci:
+    name: CI
+    uses: example-org/shared-actions/.github/workflows/build-service.yaml@build-service-v1
+    with:
+      deepsource_dsn_vault_path: 'ci/kvv2/code-quality-dsn microservice-card-service'
+      trigger_image_push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    secrets: inherit
+  
+  cd:
+    name: CD (Dev)
+    needs: ci
+    uses: example-org/shared-actions/.github/workflows/deploy-service.yaml@deploy-service-v1
+    secrets: inherit
+    with:
+      environment: 'dev'
+      regions: |
+        - us-east-1
+      services: |
+        - card-dispatcher
+        - card-producer
+        - card-service-api
+        - card-service-company-consumer
+      application_version: ${{ needs.ci.outputs.app_version }}
+      run_migrations: true
+      flyway_locations: filesystem:flyway/db/migrations,filesystem:flyway/db/seeds/dev
+      db_name: cards
+      db_secret_name: dev-card-service-aurora-endpoint
+      trigger_deployment: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}

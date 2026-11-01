@@ -1,0 +1,20 @@
+# rewriteTerraformGitUrlsToIncludeToken.yml
+# rewriteTerraformGitUrlsToIncludeToken configuration
+
+steps:
+  - powershell: |
+      Get-ChildItem -Recurse -Filter '*.tf' | ForEach-Object -Process {
+        if($PSItem -eq $null) {
+          Write-Output "PSItem null"
+          continue
+        }
+
+        $filePath = $PSItem.Directory.ToString() + '\\' + $PSItem.Name.ToString()
+        Write-Output $filePath
+
+        $tokenizedGit = 'git::https://'+$env:SYSTEM_ACCESSTOKEN+'@dev.azure.com'
+        (Get-Content $filePath) -replace 'git::https://dev.azure.com',$tokenizedGit | Set-Content $filePath
+      }
+    env:
+      SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+    displayName : Inject SYSTEM_ACCESSTOKEN into tf git references

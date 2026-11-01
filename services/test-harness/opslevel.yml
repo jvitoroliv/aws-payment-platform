@@ -1,0 +1,33 @@
+# opslevel.yml — opslevel configuration
+
+# opslevel.yml — opslevel configuration
+
+---
+version: 1
+service:
+  name: TAG Test Harness Service
+  lifecycle: generally-available
+  tier: tier_3
+  product: TAG
+  owner: tag
+  system: tag
+  language: golang
+  framework: other
+  description: A tool for generating and sending test authorizations and files against the TAG application. 
+  aliases: 
+    - example-org/ps-tag-test-harness
+  tags:
+    - key: pci
+      value: yes
+    - key: type
+      value: backend
+    - key: containerized
+      value: yes
+    - key: scope
+      value: internal
+  repositories:
+  - name: example-org/ps-tag-test-harness
+    path: "/"
+    provider: github
+  tools: []
+  dependencies: []

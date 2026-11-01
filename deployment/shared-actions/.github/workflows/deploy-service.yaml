@@ -1,0 +1,759 @@
+# deploy-service.yaml
+# deployment automation
+
+name: TAG CD Workflow
+
+permissions:
+  contents: read
+  deployments: write
+
+concurrency: ${{ github.workflow }}-${{ inputs.environment }}
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: The semver of the workflow for automated tagging.
+        default: 1.0.6
+        type: string
+        required: false
+      services:
+        description: YAML list of services to deploy.
+        type: string
+        required: true
+      environment:
+        description: Environment to deploy to.
+        required: true
+        type: string
+      regions:
+        description: YAML list of regions to deploy to.
+        required: true
+        type: string
+      run_migrations:
+        description: Whether to run Flyway migrations or not.
+        required: true
+        type: boolean
+      application_version:
+        description: Application version to deploy.
+        required: true
+        type: string
+      db_name:
+        description: Postgres database name, used for Flyway migrations.
+        required: false
+        type: string
+        default: ''
+      db_secret_name:
+        description: Database secret used to retrieve the DB hostname.
+        required: false
+        type: string
+        default: ''
+      jfrog_cli_version:
+        description: Jfrog CLI version.
+        required: false
+        type: string
+        default: 2.63.0
+      flyway_version:
+        description: Flyway version.
+        required: false
+        type: string
+        default: 10.15.0
+      flyway_locations:
+        description: Flyway location.
+        required: false
+        type: string
+        default: filesystem:flyway/migrations
+      vault_namespace:
+        description: Vault namespace to retrieve secrets from.
+        required: false
+        type: string
+        default: applications
+      trigger_deployment:
+        description: Whether to trigger deployment or not.
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  setup-deployment:
+    name: Setup
+    runs-on: ["tag-${{ inputs.environment }}", "self-hosted"]
+    steps:
+      # Converts YAML list input to be compatible with create-matrix: "- example1\n- example2" -> "example1,example2"
+      - name: Convert List Inputs
+        id: convert-inputs
+        run: |
+          regions=$REGIONS_INPUT
+          services=$SERVICES_INPUT
+          convert-yaml-list() {
+            input=$1
+            echo "$input" | sed 's/- //g' | tr '\n' ',' | sed 's/[,-]*$//'
+          }
+          # Workaround for workflow_dispatch event not supporting multi-line strings. Convert \n input to newline.
+          if [ "$EVENT" == 'workflow_dispatch' ]; then
+            regions=$(echo -e "$regions")
+            services=$(echo -e "$services")
+          fi
+          services=$(convert-yaml-list "$services")
+          regions=$(convert-yaml-list "$regions")
+          echo "services=$services" >> $GITHUB_OUTPUT
+          echo "regions=$regions" >> $GITHUB_OUTPUT
+        env:
+          SERVICES_INPUT: ${{ inputs.services }}
+          REGIONS_INPUT: ${{ inputs.regions }}
+          EVENT: ${{ github.event_name }}
+
+      # Create a JSON formatted matrix from the comma separated strings
+      - name: Create Matrix
+        id: create-matrix
+        uses: druzsan/setup-matrix@v2
+        with:
+          matrix: |
+            regions: [${{ steps.convert-inputs.outputs.regions }}]
+            services: [${{ steps.convert-inputs.outputs.services }}]
+
+      - name: Output Matrix
+        id: output-matrix
+        run: |
+          service_matrix=$(echo "$MATRIX" | jq -c '{services: .services}')
+          region_matrix=$(echo "$MATRIX" | jq -c '{regions: .regions}')
+          echo $service_matrix
+          echo $region_matrix
+          echo "service_matrix=$service_matrix" >> $GITHUB_OUTPUT
+          echo "region_matrix=$region_matrix" >> $GITHUB_OUTPUT
+        env:
+          MATRIX: ${{ steps.create-matrix.outputs.matrix }}
+
+      - name: Validate Inputs and Set Outputs
+        id: set-config
+        env:
+          SERVICES: ${{ steps.output-matrix.outputs.service_matrix }}
+          REGIONS: ${{ steps.output-matrix.outputs.region_matrix }}
+          ENVIRONMENT: ${{ inputs.environment }}
+          RUN_MIGRATIONS: ${{ inputs.run_migrations }}
+          VERSION: ${{ inputs.application_version }}
+          DB_NAME: ${{ inputs.db_name }}
+          DB_SECRET_NAME: ${{ inputs.db_secret_name }}
+          JFROG_CLI_VERSION: ${{ inputs.jfrog_cli_version }}
+          FLYWAY_VERSION: ${{ inputs.flyway_version }}
+          FLYWAY_LOCATIONS: ${{ inputs.flyway_locations }}
+        run: |
+          # Validate inputs
+          if [ -z "$SERVICES" ]; then
+            echo "::error::Services name input was not set."
+            exit 1
+          fi
+          if [ -z "$REGIONS" ]; then
+            echo "::error::Regions input was not set."
+            exit 1
+          fi
+          if [ -z "$ENVIRONMENT" ]; then
+            echo "::error::Environment input was not set."
+            exit 1
+          fi
+          if [ -z "$VERSION" ]; then
+            echo "::error::Version input was not set."
+            exit 1
+          fi
+          if [ -z "$RUN_MIGRATIONS" ]; then
+            echo "::error::Run migrations input was not set."
+            exit 1
+          fi
+
+          # Validate migration specific inputs
+          if [ "$RUN_MIGRATIONS" = true ]; then
+            if [ -z "$DB_NAME" ]; then
+              echo "::error::DB name input was not set."
+              exit 1
+            fi
+            if [ -z "$DB_SECRET_NAME" ]; then
+              echo "::error::DB_SECRET_NAME input was not set."
+              exit 1
+            fi
+          fi
+
+          # Validate Environment
+          if [[ "$ENVIRONMENT" == "dev" || "$ENVIRONMENT" == "test" ]]; then
+            echo "ENV_TYPE=nonprod" >> $GITHUB_OUTPUT
+          elif [[ "$ENVIRONMENT" == "stage" || "$ENVIRONMENT" == "prod" ]]; then
+            echo "ENV_TYPE=prod" >> $GITHUB_OUTPUT
+          else
+            echo "::error::Invalid environment input. Allowed values are dev, test, stage and prod."
+            exit 1
+          fi
+
+          # Set Outputs
+          echo "SERVICES=$SERVICES" >> $GITHUB_OUTPUT
+          echo "REGIONS=$REGIONS" >> $GITHUB_OUTPUT
+          echo "ENVIRONMENT=$ENVIRONMENT" >> $GITHUB_OUTPUT
+          echo "RUN_MIGRATIONS=$RUN_MIGRATIONS" >> $GITHUB_OUTPUT
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "DB_NAME=$DB_NAME" >> $GITHUB_OUTPUT
+          echo "DB_SECRET_NAME=$DB_SECRET_NAME" >> $GITHUB_OUTPUT
+          echo "JFROG_CLI_VERSION=$JFROG_CLI_VERSION" >> $GITHUB_OUTPUT
+          echo "FLYWAY_VERSION=$FLYWAY_VERSION" >> $GITHUB_OUTPUT
+          echo "FLYWAY_LOCATIONS=$FLYWAY_LOCATIONS" >> $GITHUB_OUTPUT
+
+      - name: Get Runner Context
+        id: runner-context
+        uses: example-org/shared-actions/fabric/context@v1
+
+      - name: Get Fabric Configuration
+        id: fabric
+        uses: example-org/shared-actions/fabric/configuration@v1
+        with:
+          fabric_id: ${{ steps.runner-context.outputs.fabric_id }}
+
+      - name: Get Fabric Info
+        id: set-fabric
+        run: |
+          FABRIC_ID=$(echo $FABRIC_CONFIG | jq -r '.fabric_id')
+          VAULT="${{ inputs.vault_namespace }}"
+          if [[ "$VAULT" == "" ]]; then
+            VAULT=$(echo "$FABRIC_CONFIG" | jq -r '.vaults? | keys? | first // empty')
+          fi
+          echo "FABRIC_ID=${FABRIC_ID}" >> "$GITHUB_OUTPUT"
+          echo "VAULT_NAMESPACE=admin/${FABRIC_ID}/${VAULT}" >> "$GITHUB_OUTPUT"
+        env:
+          FABRIC_CONFIG: ${{ steps.fabric.outputs.config }}
+          ENVIRONMENT: ${{ steps.runner-context.outputs.environment }}
+
+      - name: Setup JFrog CLI
+        uses: example-org/shared-actions/fabric/artifactory-cli@v1
+        with:
+          artifactory_url: registry.example.io
+          jfrog_cli_version: ${{ steps.set-config.outputs.JFROG_CLI_VERSION }}
+          vault_namespace: applications
+          vault_secret: ci/kvv2/artifactory
+          vault_secret_key: token
+
+       # Loops through each service checking if the image exists in Artifactory docker nonprod
+      - name: Validate Artifactory Image (Nonprod Repo)
+        if: ${{ github.event_name != 'pull_request' }}
+        shell: bash
+        run: |
+          for service in $(echo "$MATRIX" | jq -r '.services[]'); do
+            IMAGE="${ARTIFACTORY_URL}/${service}/${VERSION}"
+            echo "Checking for image: $IMAGE"
+            if [ $(jf rt search "${IMAGE}/manifest.json" --count) -gt 0 ]; then
+              echo "Image was found."
+            else
+              echo "::error::Image was not found."
+              exit 1
+            fi
+          done
+        env:
+          MATRIX: ${{ steps.output-matrix.outputs.service_matrix }}
+          ARTIFACTORY_URL: ${{ steps.set-fabric.outputs.FABRIC_ID }}-docker-nonprod-federated-us/${{ steps.set-fabric.outputs.FABRIC_ID }}
+          VERSION: ${{ steps.set-config.outputs.VERSION }}
+
+      - name: Job Summary
+        run: |
+          echo "## Inputs" >> $GITHUB_STEP_SUMMARY
+          echo "| Caller Input   | Value                                          |" >> $GITHUB_STEP_SUMMARY
+          echo "| -------------- | --------------------------------------------   |" >> $GITHUB_STEP_SUMMARY
+          echo "| SERVICES       | ${{ steps.convert-inputs.outputs.services }}   |" >> $GITHUB_STEP_SUMMARY
+          echo "| ENVIRONMENT    | ${{ steps.set-config.outputs.ENVIRONMENT }}    |" >> $GITHUB_STEP_SUMMARY
+          echo "| REGIONS        | ${{ steps.convert-inputs.outputs.regions }}    |" >> $GITHUB_STEP_SUMMARY
+          echo "| RUN_MIGRATIONS | ${{ steps.set-config.outputs.RUN_MIGRATIONS }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| VERSION        | ${{ steps.set-config.outputs.VERSION }}        |" >> $GITHUB_STEP_SUMMARY
+          echo "| DB_NAME        | ${{ steps.set-config.outputs.DB_NAME }}        |" >> $GITHUB_STEP_SUMMARY
+          echo "| DB_SECRET_NAME | ${{ steps.set-config.outputs.DB_SECRET_NAME }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "| Optional Input    | Value                                            |" >> $GITHUB_STEP_SUMMARY
+          echo "| ----------------  | -----------------------------------------------  |" >> $GITHUB_STEP_SUMMARY
+          echo "| JFROG_CLI_VERSION | ${{ steps.set-config.outputs.JFROG_CLI_VERSION }}|" >> $GITHUB_STEP_SUMMARY
+          echo "| FLYWAY_VERSION    | ${{ steps.set-config.outputs.FLYWAY_VERSION }}   |" >> $GITHUB_STEP_SUMMARY
+          echo "| FLYWAY_LOCATIONS  | ${{ steps.set-config.outputs.FLYWAY_LOCATIONS }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "| Other             | Value                                            |" >> $GITHUB_STEP_SUMMARY
+          echo "| ----------------  | -----------------------------------------------  |" >> $GITHUB_STEP_SUMMARY
+          echo "| ENV_TYPE          | ${{ steps.set-config.outputs.ENV_TYPE }}         |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "## Fabric Info" >> $GITHUB_STEP_SUMMARY
+          echo "| Key              | Value                                            |" >> $GITHUB_STEP_SUMMARY
+          echo "| ---------------- | -----------------------------------------------  |" >> $GITHUB_STEP_SUMMARY
+          echo "| FABRIC_ID        | ${{ steps.set-fabric.outputs.FABRIC_ID }}        |" >> $GITHUB_STEP_SUMMARY
+          echo "| VAULT_NAMESPACE  | ${{ steps.set-fabric.outputs.VAULT_NAMESPACE }}  |" >> $GITHUB_STEP_SUMMARY
+
+    outputs:
+      SERVICE_MATRIX: ${{ steps.output-matrix.outputs.service_matrix }}
+      REGION_MATRIX: ${{ steps.output-matrix.outputs.region_matrix }}
+      SERVICES: ${{ steps.set-config.outputs.SERVICES }}
+      ENVIRONMENT: ${{ steps.set-config.outputs.ENVIRONMENT }}
+      REGIONS: ${{ steps.set-config.outputs.REGIONS }}
+      RUN_MIGRATIONS: ${{ steps.set-config.outputs.RUN_MIGRATIONS }}
+      VERSION: ${{ steps.set-config.outputs.VERSION }}
+      DB_NAME: ${{ steps.set-config.outputs.DB_NAME }}
+      DB_SECRET_NAME: ${{ steps.set-config.outputs.DB_SECRET_NAME }}
+      JFROG_CLI_VERSION: ${{ steps.set-config.outputs.JFROG_CLI_VERSION }}
+      FLYWAY_VERSION: ${{ steps.set-config.outputs.FLYWAY_VERSION }}
+      FLYWAY_LOCATIONS: ${{ steps.set-config.outputs.FLYWAY_LOCATIONS }}
+      ENV_TYPE: ${{ steps.set-config.outputs.ENV_TYPE }}
+      FABRIC_ID: ${{ steps.set-fabric.outputs.fabric_id }}
+      VAULT_NAMESPACE: ${{ steps.set-fabric.outputs.vault_namespace }}
+
+  plan-changes:
+    name: Plan Changes
+    needs:
+      - setup-deployment
+    strategy:
+      matrix: ${{ fromJson(needs.setup-deployment.outputs.REGION_MATRIX) }}
+      fail-fast: false
+    runs-on: ["tag-${{ inputs.environment }}", "self-hosted"]
+    steps:
+      - name: Set permissions to allow checkout action to clean the workspace
+        run: |
+          sudo chmod -R ug+rwX ${GITHUB_WORKSPACE}
+        # NOTE: The root cause of the permissions errors appear to be the Go compiler setting
+        # directories within .mod to read only. As Github Actions run as the 'github' user (non-root)
+        # this causes the checkout action to fail when it tries to 'git clean'.
+        # We can mitigate the root cause by setting the -modcacherw GOFLAG in all Go builds:
+        # https://go.dev/ref/mod#go-clean-modcache
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          # Note: Use the Terraform source from the same commit as the workflow
+          ref: ${{ github.head_ref }}
+          fetch-tags: 'true'
+          fetch-depth: 0
+
+      - name: Get Read Only Token
+        id: generate_token
+        uses: example-org/shared-actions/github/app-token@v1
+        with:
+          secret: ${{ secrets.FABRIC_SHARED_ACTION_READONLY_KEY }}
+
+      - name: Add GitHub Token to env
+        run: echo "GH_TOKEN=${GH_TOKEN}" >> $GITHUB_ENV
+        env:
+          GH_TOKEN: ${{ steps.generate_token.outputs.token }}
+
+      - name: Get Database Hostname from AWS
+        if: ${{ inputs.run_migrations == true && matrix.regions == 'us-east-1' }}
+        id: set-hostname
+        run: |
+          echo "Getting hostname from AWS Secrets Manager."
+          echo "DB_HOSTNAME=$(aws secretsmanager get-secret-value --secret-id $DB_SECRET --query 'SecretString' --output text | jq -r .primary_endpoint)" >> $GITHUB_OUTPUT
+        env:
+          DB_SECRET: ${{ needs.setup-deployment.outputs.DB_SECRET_NAME }}
+
+      - name: Flyway Info
+        uses: example-org/shared-actions/flyway@flyway-v2
+        id: flyway-plan
+        if: ${{ inputs.run_migrations == true && matrix.regions == 'us-east-1' }}
+        with:
+          command: info
+          db_database: ${{ needs.setup-deployment.outputs.DB_NAME }}
+          db_host: ${{ steps.set-hostname.outputs.DB_HOSTNAME }}
+          db_port: 5432
+          db_username: github-actions-runner-iam
+          db_use_iam_auth: true
+          image_version: ${{ needs.setup-deployment.outputs.FLYWAY_VERSION }}
+          locations: ${{ needs.setup-deployment.outputs.FLYWAY_LOCATIONS }}
+
+      - name: Run Terraform
+        id: terraform
+        uses: docker://registry.example.com/tag-docker-prod-federated-us/tag/tag-utilities/tag-terraform:1.6.5
+        with:
+          entrypoint: /bin/bash
+          args: |
+            -c "
+            set -e
+            set -o pipefail
+            git config --global url.\"https://noop:${GH_TOKEN}@github.com/example-org\".insteadOf \"https://github.com/example-org\"
+            cd ${ROOT_MODULE_PATH}
+            terraform init -backend-config=${BACKEND_CONFIG_PATH}
+            terraform validate
+            terraform plan --var-file=${VAR_FILE_PATH} -out tf.plan
+            PLAN_DETAILS=$(terraform show -no-color tf.plan)
+
+            if grep 'Plan: ' <<< \"${PLAN_DETAILS}\"; then
+              echo \"Plan contains changes\"
+              PLAN_SUMMARY=$(echo \"${PLAN_DETAILS}\" | grep 'Plan: ' | sed 's/Plan: //g')
+              echo \"## Terraform Planned Changes\" >> $GITHUB_STEP_SUMMARY
+              echo \"\`${PLAN_SUMMARY}\`\" >> $GITHUB_STEP_SUMMARY
+              echo \"<details><summary>Full Details</summary>\" >> $GITHUB_STEP_SUMMARY
+              echo \"\" >> $GITHUB_STEP_SUMMARY
+              echo \"\`\`\`hcl\" >> $GITHUB_STEP_SUMMARY
+              echo \"${PLAN_DETAILS}\" >> $GITHUB_STEP_SUMMARY
+              echo \"\`\`\`\" >> $GITHUB_STEP_SUMMARY
+              echo \"\" >> $GITHUB_STEP_SUMMARY
+              echo \"</details>\" >> $GITHUB_STEP_SUMMARY
+              echo \"CHANGES=true\" > $GITHUB_OUTPUT
+            elif grep 'No changes' <<< \"${PLAN_DETAILS}\"; then
+              echo \"No changes detected\"
+              echo \"## Terraform Planned Changes\" >> $GITHUB_STEP_SUMMARY
+              echo \"No changes\" >> $GITHUB_STEP_SUMMARY
+              echo \"CHANGES=false\" > $GITHUB_OUTPUT
+              exit 0
+            else
+              echo \"Parsing plan failed\"
+              exit 1
+            fi
+            "
+        env:
+          ROOT_MODULE_PATH: ./deployments/terraform/root-module
+          BACKEND_CONFIG_PATH: ../environments/${{ needs.setup-deployment.outputs.ENVIRONMENT }}/${{ matrix.regions }}/${{ needs.setup-deployment.outputs.ENVIRONMENT }}.backend
+          VAR_FILE_PATH: ../environments/${{ needs.setup-deployment.outputs.ENVIRONMENT }}/${{ matrix.regions }}/${{ needs.setup-deployment.outputs.ENVIRONMENT }}.tfvars
+          TF_VAR_app_version: ${{ needs.setup-deployment.outputs.VERSION }}
+
+      - name: Setup Cache Key
+        if: ${{ steps.terraform.outputs.CHANGES == 'true' }}
+        id: cache-key
+        run: echo "CACHE_KEY=terraform-plan-${{ hashFiles('deployments/terraform/root-module/tf.plan') }}" >> $GITHUB_OUTPUT
+
+      - name: Save Terraform Plan
+        if: ${{ steps.terraform.outputs.CHANGES == 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          key: ${{ steps.cache-key.outputs.CACHE_KEY }}
+          path: deployments/terraform/root-module/tf.plan
+
+      ## Write for matrix outputs workaround
+      - uses: cloudposse/github-action-matrix-outputs-write@v1
+        id: out
+        with:
+          matrix-step-name: ${{ github.job }}
+          matrix-key: ${{ matrix.regions }}
+          outputs: |-
+            plan-cache-key: ${{ steps.cache-key.outputs.CACHE_KEY }}
+    outputs:
+      DB_HOSTNAME: ${{ steps.set-hostname.outputs.DB_HOSTNAME }}
+
+  # This is a job that checks for approval before deploying to prod environments.
+  # It is in a separate job to ensure that a deployment object is only created once per environment (not once per region).
+  wait-for-approval:
+    name: Approval Check
+    if: inputs.trigger_deployment
+    runs-on: ["tag-${{ inputs.environment }}", "self-hosted"]
+    needs:
+      - setup-deployment
+      - plan-changes
+    environment: ${{ needs.setup-deployment.outputs.ENVIRONMENT }}
+    steps:
+      - run: |
+          echo "Deployment approved."
+
+  # After wait-for-approval is approved, GH auto sets the deployment to `success`, this job sets it back to `in_progress`.
+  start-deployment:
+    needs:
+      - setup-deployment
+      - wait-for-approval
+    runs-on: ["tag-${{ inputs.environment }}", "self-hosted"]
+    name: Start Deployment
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get Created Deployment
+        id: get-deployment
+        run: |
+          DEPLOYMENT=$(gh api \
+            -H "Accept: application/vnd.github.v3+json" \
+            "/repos/${{ github.repository }}/deployments?environment=$ENVIRONMENT" \
+            --jq '.[0]')
+
+          DEPLOYMENT_ID=$(echo $DEPLOYMENT | jq -r .id)
+
+          echo "DEPLOYMENT_ID: $DEPLOYMENT_ID"
+          echo "DEPLOYMENT_ID=$DEPLOYMENT_ID" >> $GITHUB_OUTPUT
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ENVIRONMENT: ${{ needs.setup-deployment.outputs.ENVIRONMENT }}
+
+      - name: Update Deployment (In-progress)
+        run: |
+          if [ -n "$DEPLOYMENT_ID" ]; then
+            gh api \
+              --method POST \
+              -H "Accept: application/vnd.github.v3+json" \
+              /repos/${{ github.repository }}/deployments/$DEPLOYMENT_ID/statuses \
+              -f state="$STATE"
+          else
+            echo "::error::Deployment ID was not found"
+            exit 1
+          fi
+        env:
+          DEPLOYMENT_ID: ${{ steps.get-deployment.outputs.DEPLOYMENT_ID }}
+          STATE: in_progress
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ENVIRONMENT: ${{ inputs.environment }}
+    outputs:
+      DEPLOYMENT_ID: ${{ steps.get-deployment.outputs.DEPLOYMENT_ID }}
+
+  promote-image:
+    name: Promote Docker Image
+    runs-on: ["tag-prod", "self-hosted"]
+    strategy:
+      matrix: ${{ fromJson(needs.setup-deployment.outputs.SERVICE_MATRIX) }}
+    needs:
+      - setup-deployment
+      - plan-changes
+      - start-deployment
+    # https://github.com/actions/runner/issues/1540
+    # Due to the bug above, the evaulation of the `always() && <some other condition>` does not work as expected.
+    # As a stopgap, we need an clause to check if start-deployment succeeded.
+    if: >-
+      always() &&
+      (
+        !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'skipped')
+      ) && needs.start-deployment.result == 'success' && inputs.environment == 'prod'
+    steps:
+      - name: Setup JFrog CLI
+        uses: example-org/shared-actions/fabric/artifactory-cli@v1
+        with:
+          artifactory_url: registry.example.io
+          jfrog_cli_version: ${{ needs.setup-deployment.outputs.JFROG_CLI_VERSION }}
+          vault_namespace: applications
+          vault_secret: ci/kvv2/artifactory
+          vault_secret_key: token
+
+      - name: Promote Image
+        uses: example-org/shared-actions/artifactory/artifact-promote@v1
+        with:
+          artifactory_nonprod_namespace: ${{ env.FABRIC_ID }}-docker-nonprod-federated-us/${{ env.FABRIC_ID }}/${{ matrix.services }}
+          artifactory_prod_namespace: ${{ env.FABRIC_ID }}-docker-prod-federated-us
+          source_tag: ${{ needs.setup-deployment.outputs.VERSION }}
+        env:
+          FABRIC_ID: ${{ needs.setup-deployment.outputs.FABRIC_ID }}
+
+  flyway-migrate:
+    name: Flyway migrate
+    needs:
+      - setup-deployment
+      - plan-changes
+      - promote-image
+      - start-deployment
+    if: >-
+      always() &&
+      (
+        !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled')
+      ) && needs.start-deployment.result == 'success' && inputs.run_migrations == true
+    runs-on: ["tag-${{ inputs.environment }}", "self-hosted"]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-tags: 'true'
+
+      - name: Flyway migrate
+        uses: example-org/shared-actions/flyway@flyway-v2
+        id: flyway-migrate
+        with:
+          command: migrate
+          db_database: ${{ needs.setup-deployment.outputs.DB_NAME }}
+          db_host: ${{ needs.plan-changes.outputs.DB_HOSTNAME }}
+          db_port: 5432
+          db_username: github-actions-runner-iam
+          db_use_iam_auth: true
+          image_version: ${{ needs.setup-deployment.outputs.FLYWAY_VERSION }}
+          locations: ${{ needs.setup-deployment.outputs.FLYWAY_LOCATIONS }}
+
+  apply-changes:
+    name: Apply Changes
+    needs:
+      - setup-deployment
+      - plan-changes
+      - promote-image
+      - start-deployment
+      - flyway-migrate
+    # https://github.com/actions/runner/issues/1540
+    # Due to the bug above, the evaulation of the `always() && <some other condition>` does not work as expected.
+    # As a stopgap, we need an clause to check if start-deployment succeeded.
+    if: >-
+      always() &&
+      (
+        !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled')
+      ) && needs.start-deployment.result == 'success'
+    strategy:
+      matrix: ${{ fromJson(needs.setup-deployment.outputs.REGION_MATRIX) }}
+      fail-fast: false
+    runs-on: ["tag-${{ inputs.environment }}", "self-hosted"]
+    steps:
+      - name: Set permissions to allow checkout action to clean the workspace
+        run: |
+          sudo chmod -R ug+rwX ${GITHUB_WORKSPACE}
+        # NOTE: The root cause of the permissions errors appear to be the Go compiler setting
+        # directories within .mod to read only. As Github Actions run as the 'github' user (non-root)
+        # this causes the checkout action to fail when it tries to 'git clean'.
+        # We can mitigate the root cause by setting the -modcacherw GOFLAG in all Go builds:
+        # https://go.dev/ref/mod#go-clean- modcache
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          # Note: Use the Terraform source from the same commit as the workflow
+          ref: ${{ github.head_ref }}
+          fetch-tags: 'true'
+
+      - uses: cloudposse/github-action-matrix-outputs-read@v1
+        id: read
+        with:
+          matrix-step-name: plan-changes
+
+      - name: Extract matrix outputs
+        id: extract-matrix
+        run: |
+          echo PLAN_CACHE_KEY="${{ fromJson(steps.read.outputs.result).plan-cache-key[env.REGION] }}" >> $GITHUB_OUTPUT
+          echo $PLAN_CACHE_KEY
+        env:
+          REGION: ${{ matrix.regions }}
+
+      - name: Restore Terraform Plan
+        uses: actions/cache/restore@v4
+        with:
+          fail-on-cache-miss: 'true'
+          key: ${{ env.PLAN_CACHE_KEY }}
+          path: deployments/terraform/root-module/tf.plan
+        env:
+          PLAN_CACHE_KEY: ${{ steps.extract-matrix.outputs.PLAN_CACHE_KEY }}
+
+      - name: Setup JFrog CLI
+        if: ${{ inputs.environment == 'prod' }}
+        uses: example-org/shared-actions/fabric/artifactory-cli@v1
+        with:
+          artifactory_url: registry.example.io
+          jfrog_cli_version: ${{ needs.setup-deployment.outputs.JFROG_CLI_VERSION }}
+          vault_namespace: applications
+          vault_secret: ci/kvv2/artifactory
+          vault_secret_key: token
+
+      # Loops through each service checking if the image exists in Artifactory docker prod
+      - name: Validate Artifactory Image (Prod Repo)
+        if: ${{ inputs.environment == 'prod' }}
+        shell: bash
+        run: |
+          for service in $(echo "$MATRIX" | jq -r '.services[]'); do
+            IMAGE="${ARTIFACTORY_URL}/${service}/${VERSION}"
+            echo "Checking for image: $IMAGE"
+            if [ $(jf rt search "${IMAGE}/manifest.json" --count) -gt 0 ]; then
+              echo "Image was found."
+            else
+              echo "::error::Image was not found."
+              exit 1
+            fi
+          done
+        env:
+          MATRIX: ${{ needs.setup-deployment.outputs.SERVICE_MATRIX }}
+          ARTIFACTORY_URL: ${{ needs.setup-deployment.outputs.FABRIC_ID }}-docker-prod-federated-us/${{ needs.setup-deployment.outputs.FABRIC_ID }}
+          VERSION: ${{ needs.setup-deployment.outputs.VERSION }}
+
+      - name: Get Read Only Token
+        id: generate_token
+        uses: example-org/shared-actions/github/app-token@v1
+        with:
+          secret: ${{ secrets.FABRIC_SHARED_ACTION_READONLY_KEY }}
+
+      - name: Add GitHub Token to env
+        run: echo "GH_TOKEN=${GH_TOKEN}" >> $GITHUB_ENV
+        env:
+          GH_TOKEN: ${{ steps.generate_token.outputs.token }}
+
+      - name: Run Terraform
+        uses: docker://registry.example.com/tag-docker-prod-federated-us/tag/tag-utilities/tag-terraform:1.6.5
+        with:
+          entrypoint: /bin/bash
+          args: |
+            -c "
+            set -e
+            set -o pipefail
+            git config --global url.\"https://noop:${GH_TOKEN}@github.com/example-org\".insteadOf \"https://github.com/example-org\"
+            cd ${ROOT_MODULE_PATH}
+            terraform init -backend-config=${BACKEND_CONFIG_PATH}
+            terraform apply -input=false -auto-approve -no-color tf.plan | tee apply.log
+            APPLY_SUMMARY=$(grep \"Apply complete!\" apply.log | sed 's/Apply complete! Resources: //g')
+            echo \"## Terraform Applied Changes\" >> $GITHUB_STEP_SUMMARY
+            echo \"\`${APPLY_SUMMARY}\`\" >> $GITHUB_STEP_SUMMARY
+            echo \"<details><summary>Full Details</summary>\" >> $GITHUB_STEP_SUMMARY
+            echo \"\" >> $GITHUB_STEP_SUMMARY
+            echo \"\`\`\`hcl\" >> $GITHUB_STEP_SUMMARY
+            echo \"$(cat apply.log)\" >> $GITHUB_STEP_SUMMARY
+            echo \"\`\`\`\" >> $GITHUB_STEP_SUMMARY
+            echo \"\" >> $GITHUB_STEP_SUMMARY
+            echo \"</details>\" >> $GITHUB_STEP_SUMMARY
+            "
+        env:
+          ROOT_MODULE_PATH: ./deployments/terraform/root-module
+          BACKEND_CONFIG_PATH: ../environments/${{ needs.setup-deployment.outputs.ENVIRONMENT }}/${{ matrix.regions }}/${{ needs.setup-deployment.outputs.ENVIRONMENT }}.backend
+          VAR_FILE_PATH: ../environments/${{ needs.setup-deployment.outputs.ENVIRONMENT }}/${{ matrix.regions }}/${{ needs.setup-deployment.outputs.ENVIRONMENT }}.tfvars
+
+  matrix-status-check:
+    name: Update Deployment Status
+    runs-on: ["tag-${{ inputs.environment }}", "self-hosted"]
+    needs:
+      - setup-deployment
+      - start-deployment
+      - apply-changes
+      - promote-image
+      - flyway-migrate
+    # https://github.com/actions/runner/issues/1540
+    # Due to the bug above, the evaulation of the `always() && <some other condition>` does not work as expected.
+    # As a stopgap, we need an clause to check if start-deployment succeeded.
+    if: >-
+      always() &&
+      (
+        contains(needs.*.result, 'success') || contains(needs.*.result, 'failure')
+      ) && needs.start-deployment.result == 'success'
+    steps:
+      - name: Print job outcomes
+        run: |
+          echo "needs.*.result: ${{ toJson(needs.*.result) }}"
+
+      - name: Check if deployment is in progress
+        if: >-
+          contains(needs.*.result, 'success') || contains(needs.*.result, 'failure')
+        run: |
+          DEPLOYMENT=$(gh api \
+            -H "Accept: application/vnd.github.v3+json" \
+            "/repos/${{ github.repository }}/deployments/$DEPLOYMENT_ID/statuses" \
+            --jq '.[0]')
+
+          STATE=$(echo $DEPLOYMENT | jq -r .state)
+
+          if [ "$STATE" != "in_progress" ]; then
+            echo "::error::Deployment is not in progress, setting deployment to error."
+            gh api \
+                --method POST \
+                -H "Accept: application/vnd.github.v3+json" \
+                /repos/${{ github.repository }}/deployments/$DEPLOYMENT_ID/statuses \
+                -f state="error"
+            exit 1
+          fi
+        env:
+          DEPLOYMENT_ID: ${{ needs.start-deployment.outputs.DEPLOYMENT_ID }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Fail if any workflow job was not a success.
+      - name: Update Deployment (Error)
+        if: >-
+          contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: |
+          gh api \
+              --method POST \
+              -H "Accept: application/vnd.github.v3+json" \
+              /repos/${{ github.repository }}/deployments/$DEPLOYMENT_ID/statuses \
+              -f state="$STATE"
+          exit 1
+        env:
+          DEPLOYMENT_ID: ${{ needs.start-deployment.outputs.DEPLOYMENT_ID }}
+          STATE: error
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # If all jobs are successful (doesn't include skipped jobs)
+      - name: Update Deployment (Success)
+        if: >-
+          contains(needs.*.result, 'success')
+        run: |
+          gh api \
+              --method POST \
+              -H "Accept: application/vnd.github.v3+json" \
+              /repos/${{ github.repository }}/deployments/$DEPLOYMENT_ID/statuses \
+              -f state="$STATE"
+        env:
+          DEPLOYMENT_ID: ${{ needs.start-deployment.outputs.DEPLOYMENT_ID }}
+          STATE: success
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,72 @@
+node('test') {
+
+    stage('Checkout') {
+        checkout scm
+    }
+
+
+    stage('Prepare') {
+        buildName "${env.BUILD_NUMBER}) ${env.CHANGE_BRANCH}"
+        buildDescription "${env.CHANGE_BRANCH} => ${env.CHANGE_TARGET}. \nChange Author: ${env.CHANGE_AUTHOR_EMAIL}"
+        env.MOCK_SERVICE_VERSION = "${env.BRANCH_NAME}-${env.BUILD_NUMBER}"
+    }
+
+    stage('Test && Build') {
+        parallel Web: {
+            try {
+                notifySlack("Test && Build Web")
+                buildContainer = docker.image('node:12').inside("-u root -e CHROME_BIN=/usr/bin/chromium") {
+                    dir("${env.WORKSPACE}/web") {
+                        sh 'echo 🏗 Building️'
+                        sh './build_web.sh'
+                    }
+                }
+            } catch (e) {
+                currentBuild.result = 'FAILURE'
+                println e.toString()
+                notifySlack(currentBuild.result, "Cleanup Web Failed")
+            }
+        },
+                Api: {
+                    try {
+                        buildContainer = docker.image('golang:1.12-stretch').inside("-u root") {
+                            dir("${env.WORKSPACE}/go_api") {
+                                sh 'make test'
+                            }
+                        }
+                        dir("${env.WORKSPACE}/go_api") {
+                            sh 'echo 🏗 Building️ 🐳'
+                            sh "docker build . --tag registry.apps.example.com/tag/the-support-tool"
+                        }
+                    } catch (e) {
+                        currentBuild.result = 'FAILURE'
+                        println e.toString()
+                        notifySlack(currentBuild.result, "Cleanup API Failed")
+                    } finally {
+                        notifySlack(currentBuild.result, "Done with PR check.")
+                    }
+                }
+    }
+}
+
+def notifySlack(String buildStatus = 'STARTED', String stage) {
+    // Build status of null means success.
+    buildStatus = buildStatus ?: 'SUCCESS'
+
+    def color
+    def channel = "#tag-notifications"
+
+    if (buildStatus == 'STARTED') {
+        color = '#D4DADF'
+    } else if (buildStatus == 'SUCCESS') {
+        color = '#BDFFC3'
+    } else if (buildStatus == 'UNSTABLE') {
+        color = '#FFFE89'
+    } else {
+        color = '#FF9FA1'
+    }
+
+    def msg = "${buildStatus}: Stage:`${stage}` `${env.JOB_NAME}` #${env.BUILD_NUMBER}:\n${env.BUILD_URL}"
+
+    slackSend(channel: channel, color: color, message: msg)
+}

@@ -1,0 +1,64 @@
+#!groovy
+
+properties([
+    disableConcurrentBuilds(),
+    [
+        $class: 'DatadogJobProperty',
+        tagProperties: "jenkins.job.duration,jenkins.job.status"
+    ],
+    parameters([
+        string(
+            name: 'branch',
+            defaultValue: 'master',
+            description: 'The git branch to build against.',
+            trim: true
+        ),
+        string(
+            name: 'terraformVersion',
+            description: 'The version of terraform to install in the Docker image.',
+            trim: true
+        ),
+    ]),
+])
+
+node('dev') {
+    try {
+        ansiColor('xterm') {
+            stage('Prep') {
+                cleanWs()
+
+                // This needs to be all lowercase
+                def date = new Date(currentBuild.startTimeInMillis).format('yyyy-MM-dd')
+                buildName "tag-terraform ${terraformVersion} ${branch} ${date}"
+                buildDescription "Build of 'tag-terraform' Docker container"
+                deployEnv = "dev"
+                env.AWS_DEFAULT_REGION = "us-east-1"
+                env.ENVIRONMENT = 'dev'
+                checkout changelog: false, poll: false, scm: [$class: 'GitSCM', branches: [[name: "*/${branch}"]], extensions: [], userRemoteConfigs: [[credentialsId: 'jenkins-default-GitHub-Token-example-org', url: 'https://github.com/example-org/ps-tag-ops/']]]
+            }
+
+            def artifactoryCloudUrl = "registry.example.io/tag-docker-nonprod-federated-us/tag"
+            def imageName = "tag-terraform"
+            def dockerfile = "Dockerfile.${imageName}"
+
+            stage('Build') {
+                currentBuildPhase = "Build"
+
+                withDockerRegistry(credentialsId: 'tag-devops-cloud-artifactory-creds', url: "https://${artifactoryCloudUrl}") {
+                    dir("docker") {
+                        def customImage = docker.build(
+                            "${artifactoryCloudUrl}/tag-utilities/${imageName}:${terraformVersion}",
+                            "--build-arg='BUILDARCH=amd64' --build-arg='TFVERSION=${terraformVersion}' --platform=linux/amd64 -f ${dockerfile} ."
+                        )
+                        sh "docker push ${artifactoryCloudUrl}/tag-utilities/${imageName}:${terraformVersion}"
+                    }
+                }
+            }
+        }
+    } catch (Exception e) {
+        currentBuild.result = 'FAILURE'
+        println e.toString()
+    } finally {
+        notifyGoogle(currentBuild.result, "Weekly 'tag-terraform' Build")
+    }
+}

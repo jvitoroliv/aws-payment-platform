@@ -1,0 +1,262 @@
+# run-specflow-tests-fixed.yml
+# run-specflow-tests-fixed configuration
+
+parameters:
+- name: JobName
+  type: string
+- name: JobDisplayName
+  type: string
+- name: AgentPoolName
+  type: string
+- name: DependsOnJobName
+  type: string
+- name: TestArtifactName
+  type: string
+- name: Specflow_EnvironmentName
+  type: string
+- name: Specflow_SFTPHost
+  type: string
+- name: Specflow_SFTPUser
+  type: string
+- name: Specflow_SFTPPassword
+  type: string
+- name: Specflow_SFTPPort
+  type: string
+- name: Specflow_MastercomMock
+  type: string
+- name: Specflow_MastercardTagMock
+  type: string
+- name: Specflow_VisaMock
+  type: string
+- name: Specflow_FileSecret
+  type: string
+- name: Specflow_UseAWSS3
+  type: string
+- name: TestAssemblyPath
+  type: string
+- name: TestFilterCriteria
+  type: string
+- name: RunSettingsFile
+  type: string
+- name: TestRunTitle
+  type: string
+- name: DiagnosticsEnabled
+  type: boolean
+  default: false
+
+jobs:
+- job: ${{ parameters.JobName }}
+  displayName: ${{ parameters.JobDisplayName }}
+  pool: ${{ parameters.AgentPoolName }}
+  dependsOn: ${{ parameters.DependsOnJobName }}
+  steps:
+  - checkout: mainRepository
+    clean: true
+
+  - task: PowerShell@2
+    displayName: "Clean Acceptance Test Artifacts Destination"
+    inputs:
+      targetType: 'inline'
+      script: |
+        $artifactDir = "$(Pipeline.Workspace)/${{ parameters.JobName }}"
+        if (Test-Path $artifactDir) {
+          Remove-Item -Path $artifactDir -Recurse -Force
+          Write-Host "Cleaned $artifactDir"
+        }
+
+  - task: DownloadPipelineArtifact@2
+    displayName: "Pull test artifacts into context"
+    inputs:
+      artifact: ${{ parameters.TestArtifactName }}
+      path: $(Pipeline.Workspace)/${{ parameters.JobName }}
+
+  - task: NuGetToolInstaller@1
+    displayName: "Install NuGet Tool"
+    inputs:
+      versionSpec: '>=5.8.0'
+      checkLatest: true
+
+  - task: PowerShell@2
+    displayName: "Install MSTest v2 Dependencies (FIXED VERSION)"
+    inputs:
+      targetType: 'inline'
+      script: |
+        Write-Host "Installing MSTest v2 dependencies with FIXED versions..."
+
+        $ErrorActionPreference = "Continue"
+
+        $workingDir = "$(Pipeline.Workspace)/${{ parameters.JobName }}"
+        $packagesDir = "$workingDir\packages"
+
+        Write-Host "Working directory: $workingDir"
+        Write-Host "Packages directory: $packagesDir"
+
+        if (!(Test-Path $packagesDir)) {
+            New-Item -ItemType Directory -Path $packagesDir -Force
+            Write-Host "Created packages directory"
+        }
+
+        try {
+            # Install System.Collections.Immutable 1.5.0 FIRST (assembly version 1.2.3.0 required by ChargeBack.dll)
+            Write-Host "Installing System.Collections.Immutable version 1.5.0 (assembly version 1.2.3.0)..."
+            & nuget install System.Collections.Immutable -Version 1.5.0 -OutputDirectory $packagesDir -NonInteractive -Verbosity detailed
+
+            # Install System.Text.Json 5.0.2 (assembly version 5.0.0.0 required by ChargeBack.dll)
+            Write-Host "Installing System.Text.Json version 5.0.2 (assembly version 5.0.0.0)..."
+            & nuget install System.Text.Json -Version 5.0.2 -OutputDirectory $packagesDir -NonInteractive -Verbosity detailed
+
+            # Install Microsoft.IO.RecyclableMemoryStream 1.4.1 (assembly version 1.4.1.0 required by EPPlus)
+            Write-Host "Installing Microsoft.IO.RecyclableMemoryStream version 1.4.1 (assembly version 1.4.1.0)..."
+            & nuget install Microsoft.IO.RecyclableMemoryStream -Version 1.4.1 -OutputDirectory $packagesDir -NonInteractive -Verbosity detailed
+
+            # Install modern MSTest (will also install dependencies)
+            Write-Host "Installing MSTest.TestAdapter (latest compatible)..."
+            & nuget install MSTest.TestAdapter -OutputDirectory $packagesDir -NonInteractive -Verbosity detailed
+
+            # List installed packages
+            Write-Host "Packages installed:"
+            Get-ChildItem $packagesDir -Directory | ForEach-Object { Write-Host "  - $($_.Name)" }
+
+            # Copy System.Collections.Immutable 1.5.0 to test directory and force it
+            $immutablePackage = Get-ChildItem $packagesDir -Directory -Name "System.Collections.Immutable.1.5.0"
+            if ($immutablePackage) {
+                Write-Host "Found System.Collections.Immutable package: $immutablePackage"
+
+                $possiblePaths = @(
+                    "$packagesDir\$immutablePackage\lib\netstandard2.0\System.Collections.Immutable.dll",
+                    "$packagesDir\$immutablePackage\lib\net45\System.Collections.Immutable.dll",
+                    "$packagesDir\$immutablePackage\lib\portable-net45+win8+wp8+wpa81\System.Collections.Immutable.dll"
+                )
+
+                foreach ($path in $possiblePaths) {
+                    if (Test-Path $path) {
+                        Copy-Item $path $workingDir -Force
+                        Write-Host "Copied System.Collections.Immutable.dll from $path to $workingDir"
+
+                        $dllPath = "$workingDir\System.Collections.Immutable.dll"
+                        if (Test-Path $dllPath) {
+                            $version = [System.Reflection.AssemblyName]::GetAssemblyName($dllPath).Version
+                            Write-Host "Copied assembly version: $version"
+                        }
+                        break
+                    }
+                }
+            }
+
+            # Copy System.Text.Json 5.0.2 to test directory
+            $textJsonPackage = Get-ChildItem $packagesDir -Directory -Name "System.Text.Json.5.0.2"
+            if ($textJsonPackage) {
+                Write-Host "Found System.Text.Json package: $textJsonPackage"
+
+                $possiblePathsJson = @(
+                    "$packagesDir\$textJsonPackage\lib\netstandard2.0\System.Text.Json.dll",
+                    "$packagesDir\$textJsonPackage\lib\net461\System.Text.Json.dll",
+                    "$packagesDir\$textJsonPackage\lib\netcoreapp3.0\System.Text.Json.dll"
+                )
+
+                foreach ($path in $possiblePathsJson) {
+                    if (Test-Path $path) {
+                        Copy-Item $path $workingDir -Force
+                        Write-Host "Copied System.Text.Json.dll from $path to $workingDir"
+
+                        $dllPathJson = "$workingDir\System.Text.Json.dll"
+                        if (Test-Path $dllPathJson) {
+                            $versionJson = [System.Reflection.AssemblyName]::GetAssemblyName($dllPathJson).Version
+                            Write-Host "Copied System.Text.Json assembly version: $versionJson"
+                        }
+                        break
+                    }
+                }
+            }
+
+            # Copy Microsoft.IO.RecyclableMemoryStream 1.4.1 to test directory
+            $recyclablePackage = Get-ChildItem $packagesDir -Directory -Name "Microsoft.IO.RecyclableMemoryStream.1.4.1"
+            if ($recyclablePackage) {
+                Write-Host "Found Microsoft.IO.RecyclableMemoryStream package: $recyclablePackage"
+
+                $possiblePathsRecyclable = @(
+                    "$packagesDir\$recyclablePackage\lib\netstandard2.0\Microsoft.IO.RecyclableMemoryStream.dll",
+                    "$packagesDir\$recyclablePackage\lib\net45\Microsoft.IO.RecyclableMemoryStream.dll",
+                    "$packagesDir\$recyclablePackage\lib\netstandard1.4\Microsoft.IO.RecyclableMemoryStream.dll"
+                )
+
+                foreach ($path in $possiblePathsRecyclable) {
+                    if (Test-Path $path) {
+                        Copy-Item $path $workingDir -Force
+                        Write-Host "Copied Microsoft.IO.RecyclableMemoryStream.dll from $path to $workingDir"
+
+                        $dllPathRecyclable = "$workingDir\Microsoft.IO.RecyclableMemoryStream.dll"
+                        if (Test-Path $dllPathRecyclable) {
+                            $versionRecyclable = [System.Reflection.AssemblyName]::GetAssemblyName($dllPathRecyclable).Version
+                            Write-Host "Copied Microsoft.IO.RecyclableMemoryStream assembly version: $versionRecyclable"
+                        }
+                        break
+                    }
+                }
+            }
+
+            # Remove conflicting versions
+            Write-Host "Removing conflicting versions..."
+
+            $conflictingImmutable = Get-ChildItem $packagesDir -Directory -Name "System.Collections.Immutable.*" |
+                Where-Object { $_ -ne "System.Collections.Immutable.1.5.0" }
+            foreach ($conflict in $conflictingImmutable) {
+                Remove-Item "$packagesDir\$conflict" -Recurse -Force -ErrorAction SilentlyContinue
+                Write-Host "Removed System.Collections.Immutable: $conflict"
+            }
+
+            $conflictingJson = Get-ChildItem $packagesDir -Directory -Name "System.Text.Json.*" |
+                Where-Object { $_ -ne "System.Text.Json.5.0.2" }
+            foreach ($conflict in $conflictingJson) {
+                Remove-Item "$packagesDir\$conflict" -Recurse -Force -ErrorAction SilentlyContinue
+                Write-Host "Removed System.Text.Json: $conflict"
+            }
+
+            $conflictingRecyclable = Get-ChildItem $packagesDir -Directory -Name "Microsoft.IO.RecyclableMemoryStream.*" |
+                Where-Object { $_ -ne "Microsoft.IO.RecyclableMemoryStream.1.4.1" }
+            foreach ($conflict in $conflictingRecyclable) {
+                Remove-Item "$packagesDir\$conflict" -Recurse -Force -ErrorAction SilentlyContinue
+                Write-Host "Removed Microsoft.IO.RecyclableMemoryStream: $conflict"
+            }
+
+            # Create binding redirect config for MULTIPLE assemblies
+            $configPath = "$workingDir\ChargeBack.dll.config"
+            $xml = New-Object System.Xml.XmlDocument
+            $xml.LoadXml('<?xml version="1.0" encoding="utf-8"?><configuration><runtime><assemblyBinding xmlns="urn:schemas-microsoft-com:asm.v1"><dependentAssembly><assemblyIdentity name="System.Collections.Immutable" publicKeyToken="b03f5f7f11d50a3a" culture="neutral" /><bindingRedirect oldVersion="0.0.0.0-198.51.100.0" newVersion="1.2.3.0" /></dependentAssembly><dependentAssembly><assemblyIdentity name="System.Text.Json" publicKeyToken="cc7b13ffcd2ddd51" culture="neutral" /><bindingRedirect oldVersion="0.0.0.0-198.51.100.0" newVersion="5.0.0.0" /></dependentAssembly><dependentAssembly><assemblyIdentity name="Microsoft.IO.RecyclableMemoryStream" publicKeyToken="31bf3856ad364e35" culture="neutral" /><bindingRedirect oldVersion="0.0.0.0-198.51.100.0" newVersion="1.4.1.0" /></dependentAssembly></assemblyBinding></runtime></configuration>')
+            $xml.Save($configPath)
+            Write-Host "Created binding redirect config for System.Collections.Immutable (1.2.3.0), System.Text.Json (5.0.0.0), and Microsoft.IO.RecyclableMemoryStream (1.4.1.0)"
+
+            Write-Host "Dependencies installation completed successfully with FORCED versions."
+
+        } catch {
+            Write-Host "Error during installation: $($_.Exception.Message)"
+            throw
+        }
+      errorActionPreference: 'stop'
+      failOnStderr: true
+
+  - task: VSTest@2
+    displayName: "Run Tests"
+    inputs:
+      testSelector: 'testAssemblies'
+      testAssemblyVer2: $(Pipeline.Workspace)/${{ parameters.JobName }}/${{ parameters.TestAssemblyPath }}
+      testFiltercriteria: ${{ parameters.TestFilterCriteria }}
+      runSettingsFile: $(Pipeline.Workspace)/${{ parameters.JobName }}/${{ parameters.RunSettingsFile }}
+      overrideTestrunParameters: -Specflow_EnvironmentName "${{ parameters.Specflow_EnvironmentName }}" -Specflow_SFTPHost "${{ parameters.Specflow_SFTPHost }}" -Specflow_SFTPUser "${{ parameters.Specflow_SFTPUser }}" -Specflow_SFTPPassword "${{ parameters.Specflow_SFTPPassword }}" -Specflow_SFTPPort "${{ parameters.Specflow_SFTPPort }}" -Specflow_MastercomMock "${{ parameters.Specflow_MastercomMock }}" -Specflow_MastercardTagMock "${{ parameters.Specflow_MastercardTagMock }}" -Specflow_VisaMock "${{ parameters.Specflow_VisaMock }}" -Specflow_FileSecret "${{ parameters.Specflow_FileSecret }}" -Specflow_UseAWSS3 "${{ parameters.Specflow_UseAWSS3 }}"
+      testRunTitle: ${{ parameters.TestRunTitle }}
+      platform: AnyCpu
+      configuration: release
+      diagnosticsEnabled: ${{ parameters.DiagnosticsEnabled }}
+      otherConsoleOptions: '/Framework:.NETFramework,Version=v4.8 /logger:trx /TestAdapterPath:"$(Pipeline.Workspace)/${{ parameters.JobName }}/packages"'
+
+  - task: PowerShell@2
+    displayName: "Clean Acceptance Test Artifacts Destination"
+    condition: always()
+    inputs:
+      targetType: 'inline'
+      script: |
+        $artifactDir = "$(Pipeline.Workspace)/${{ parameters.JobName }}"
+        if (Test-Path $artifactDir) {
+          Remove-Item -Path $artifactDir -Recurse -Force
+          Write-Host "Cleaned $artifactDir"
+        }

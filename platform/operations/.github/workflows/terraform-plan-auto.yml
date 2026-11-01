@@ -1,0 +1,28 @@
+# terraform-plan-auto.yml
+# terraform-plan-auto configuration
+# Maintained by: Platform Engineering
+
+# terraform-plan-auto.yml — terraform-plan-auto configuration
+
+name: Terraform Auto Plan for PRs
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  terraform-auto-plan-in-prs:
+    name: Terraform Auto Plan
+    uses: example-org/shared-actions/.github/workflows/terraform-plan-auto-and-trigger.yaml@terraform-plan-auto-and-trigger-v1.0.0-pre.52
+    with:
+      us_east_1_backend_config_path: "../environments/{env}/us-east-1/{env}.backend"
+      us_east_1_var_file_path: "../environments/{env}/us-east-1/{env}.tfvars"
+      us_west_2_backend_config_path: "../environments/{env}/us-west-2/{env}.backend"
+      us_west_2_var_file_path: "../environments/{env}/us-west-2/{env}.tfvars"
+      working_directory: "./terraform/tag_core"
+      terraform_variables: ""
+      app_version_dev: ""
+      app_version_test: ""
+      app_version_stage: ""
+      app_version_prod: ""
+    secrets: inherit

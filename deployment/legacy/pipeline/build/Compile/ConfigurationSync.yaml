@@ -1,0 +1,57 @@
+# ConfigurationSync.yaml
+# ConfigurationSync configuration
+# Maintained by: Platform Engineering
+
+# ConfigurationSync.yaml — ConfigurationSync configuration
+
+trigger:
+  branches:
+    include:
+    - Major
+  paths:
+    include:
+    - src/Database/Scripts/CoreService/PostSchema
+
+variables:
+- group: coreplatform-github
+- name: time_stamp
+  value: $(Get-Date -format yyyMMdd-Hmmss)
+
+jobs:
+- job: ConfigurationSync_Job
+  displayName: ConfigurationSync Job
+  timeoutInMinutes: 60
+  pool:
+    name: CoreService-Sync
+    demands: msbuild
+  workspace:
+    clean: all
+  steps:
+  - checkout: self
+    clean: true
+    persistCredentials: true
+
+  - task: MSBuild@1
+    displayName: Build solution ConfigurationSync_Redirector.proj
+    inputs:
+      solution: ConfigurationSync_Redirector.proj
+      msbuildVersion: 17.0
+      platform: Any CPU
+      configuration: Release
+      msbuildArguments: /p:NewRootDir="$(Build.SourcesDirectory)"
+      
+  - powershell: 'git pull origin Major'
+    displayName: Git Pull
+    
+  - powershell: 'git checkout -b configsync/ENC-ConfigSync-$(time_stamp)'
+    displayName: Git Checkout New Branch configsync/ENC-ConfigSync
+        
+  - powershell: 'git add $(Build.SourcesDirectory)\src\Database\Scripts\CoreService\PostSchema\Configuration.Sql'
+    displayName: Git Add Configuration Files
+   
+  - powershell: 'git commit -m "Configuration.Sql Update"'
+    displayName: Git Commit Configuration Files
+    ignoreLASTEXITCODE: true
+     
+  - powershell: 'git push origin HEAD:configsync/ENC-ConfigSync-$(time_stamp) --force'
+    displayName: Git Push

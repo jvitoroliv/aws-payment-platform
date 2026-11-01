@@ -1,0 +1,90 @@
+#!groovy
+
+import com.thoughtworks.xstream.converters.basic.StringBufferConverter
+
+properties(
+        [
+                parameters([
+                        string(defaultValue: 'NONE', name: 'OWNER', description: "The name of the person running this job."),
+                        choice(choices: ["dev", "test", "stage", "prod"].join("\n"),
+                                description: 'environment',
+                                name: 'ENVIRONMENT'),
+                        choice(choices: ["t3.medium", "t3.large", "t3.xlarge"].join("\n"),
+                                description: 'Support Instance Size',
+                                name: 'SIZE')
+                ]),
+                ([
+                        $class       : 'DatadogJobProperty',
+                        tagProperties: "jenkins.job.duration,jenkins.job.status"
+                ])
+        ]
+)
+
+node("support-${params.ENVIRONMENT}") {
+
+    def tfContainer = docker.image("hashicorp/terraform:1.6.5")
+    def box_id = ""
+    stage('Prep') {
+        cleanWs()
+        checkout scm
+        buildName "${env.BUILD_NUMBER}) ${params.ENVIRONMENT} - ${params.OWNER}"
+        buildDescription "${params.ENVIRONMENT} support box for ${params.OWNER}\n"
+        env.AWS_DEFAULT_REGION = 'us-east-1'
+
+    }
+    try {
+        stage('Build Support Box') {
+            tfContainer.inside("-e TF_VAR_instance_type=${params.SIZE} --entrypoint='' -u root") {
+                dir("terraform/environments/${params.ENVIRONMENT}/support") {
+                    ansiColor('xterm') {
+                        sh "terraform init -backend-config=${params.ENVIRONMENT}.backend"
+                        sh "terraform apply -auto-approve"
+                        box_id = sh(script: "terraform output support_box_name", returnStdout: true).trim().replaceAll(/\"/, /\`/)
+                        currentBuild.description = "${params.ENVIRONMENT} support box ID ${box_id} for ${params.OWNER}"
+                        try {
+                            notifyGoogleChannel("${params.ENVIRONMENT} support box ID ${box_id} for ${params.OWNER} created", "tagPipelineNotifications")
+                        } catch (Exception e) {
+                            println("Failed to notify Google Chat")
+                            print(e)
+                        }
+                    }
+
+                }
+            }
+        }
+
+        stage('Wait For User Input') {
+            println("Support box will be allowed to exist for 24 hours, or until terminated.")
+            getUserInput("${params.ENVIRONMENT}")
+        }
+
+    } catch (Exception e) {
+        currentBuild.result = 'FAILURE'
+    } finally {
+        stage('Destroy Support Box') {
+            tfContainer.inside("-e TF_VAR_instance_type=${params.SIZE} --entrypoint='' -u root") {
+                sh "git config --global --add safe.directory '*'"
+                dir("terraform/environments/${params.ENVIRONMENT}/support") {
+                    ansiColor('xterm') {
+                        notifyGoogleChannel("${params.ENVIRONMENT} support box ID ${box_id} for ${params.OWNER} is going down!", "tagPipelineNotifications")
+                        sh "terraform init -backend-config=${params.ENVIRONMENT}.backend"
+                        sh "terraform destroy -auto-approve"
+                    }
+                }
+            }
+        }
+    }
+}
+
+def getUserInput(environment) {
+    try {
+        timeout(time: 24, unit: 'HOURS') {
+            input(
+                    id: "${environment}", message: 'Are you done with the support box?', parameters: [
+                    [$class: 'BooleanParameterDefinition', defaultValue: true, description: '', name: 'Please confirm']
+            ])
+        }
+    } catch (Exception exception) { // input false
+        echo 'Request timed out, proceeding with destruction of support box...'
+    }
+}

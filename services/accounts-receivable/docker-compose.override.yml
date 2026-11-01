@@ -1,0 +1,215 @@
+# Profiles
+#   * integration-test: Run the integration tests; docker compose --profile integration-test up --attach integration-test --abort-on-container-exit
+
+services:
+  funding-group-consumer:
+    depends_on:
+      broker:
+        condition: service_started
+      init-broker:
+        condition: service_completed_successfully
+      mongo:
+        condition: service_started
+      schema-registry:
+        condition: service_healthy
+      zookeeper:
+        condition: service_started
+    # GitHub Environment — enables deployment protection rules and secrets scoping
+    environment:
+      ENVIRONMENT: docker
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://datadog-agent:4317
+    profiles:
+      - funding-group-consumer
+
+  unit-test:
+    image: accounts-receivable-unit-test
+    build:
+      context: .
+      dockerfile: cmd/funding-group-consumer/Dockerfile
+      target: builder
+      args:
+        GITHUB_USERNAME: ${GITHUB_USERNAME}
+        GITHUB_AUTH_TOKEN: ${GITHUB_AUTH_TOKEN}
+    command: [
+      "bash",
+      "-c",
+      "go test -v $$(go list ./... | grep -v /test/) -coverprofile coverage.out;
+       cat coverage.out | grep -v \"mock\" | grep -v \"stub\" > /outputs/test_coverage.out;"
+    ]
+    pull_policy: build
+    working_dir: /app
+    volumes:
+      - ./outputs:/outputs
+    profiles:
+      - unit-test
+
+  integration-test:
+    image: accounts-receivable-integration-test
+    build:
+      context: .
+      dockerfile: test/integrationtest/Dockerfile
+      args:
+        GITHUB_USERNAME: ${GITHUB_USERNAME}
+        GITHUB_AUTH_TOKEN: ${GITHUB_AUTH_TOKEN}
+    environment:
+      ENVIRONMENT: docker
+      CONFIG_PATH: ../../cmd/funding-group-consumer/config/
+      WAIT_HOSTS: zookeeper:2181,broker:9092,broker:29092,schema-registry:8081,kafka-api:8082,mongo:27017
+      WAIT_TIMEOUT: 150
+      WAIT_AFTER: 1
+    depends_on:
+      - mongo
+      - zookeeper
+      - broker
+      - schema-registry
+      - kafka-api
+    pull_policy: build
+    profiles:
+      - integration-test
+
+  datadog-agent:
+    image: gcr.io/datadoghq/agent:7
+    environment:
+      DD_API_KEY: ${DD_API_KEY}
+      DD_HOSTNAME: service-consumer-local-testing
+      DD_ENV: local
+      DD_OTLP_CONFIG_RECEIVER_PROTOCOLS_GRPC_ENDPOINT: datadog-agent:4317
+      DD_OTLP_CONFIG_RECEIVER_PROTOCOLS_HTTP_ENDPOINT: datadog-agent:4318
+    expose:
+      - "4317"
+      - "4318"
+    profiles:
+      - dd
+
+  mongo:
+    image: registry.example.io/tag-docker-nonprod-virtual-us/mongo:7.0
+    command: ["--replSet", "rs0"]
+    expose:
+      - "27017"
+    healthcheck:
+      test: echo "try { rs.status() } catch (err) { rs.initiate({_id:'rs0',members:[{_id:0,host:'mongo:27017'}]}); while (! db.hello().isWritablePrimary ) sleep(1); }" | mongosh --port 27017 --quiet
+      interval: 10s
+      timeout: 5s
+      start_period: 0s
+      retries: 4
+    profiles:
+      - funding-group-consumer
+      - integration-test
+
+  mongo-express:
+    image: ${REPOSITORY_URL}mongo-express:1.0
+    expose:
+      - "8081"
+    depends_on:
+      - mongo
+    environment:
+      ME_CONFIG_MONGODB_SERVER: mongo
+      ME_CONFIG_BASICAUTH_USERNAME: 1
+      ME_CONFIG_BASICAUTH_PASSWORD: 1
+    profiles:
+      - funding-group-consumer
+
+  zookeeper:
+    image: ${REPOSITORY_URL}confluentinc/cp-zookeeper:7.5.1
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    profiles:
+      - funding-group-consumer
+      - integration-test
+
+  broker:
+    image: ${REPOSITORY_URL}confluentinc/cp-kafka:7.5.1
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,PLAINTEXT_INTERNAL://broker:29092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+    expose:
+      - "9092"
+      - "29092"
+    depends_on:
+      - zookeeper
+    profiles:
+      - funding-group-consumer
+      - integration-test
+
+  init-broker:
+    image: ${REPOSITORY_URL}confluentinc/cp-kafka:7.5.1
+    depends_on:
+      - broker
+    entrypoint: [ '/bin/sh', '-c' ]
+    command: |
+      "
+      # Block until Kafka is reachable
+      kafka-topics --bootstrap-server broker:29092 --list
+
+      echo -e 'Creating kafka topics'
+      kafka-topics --bootstrap-server broker:29092 --create --if-not-exists --topic configuration.funding.entity-groups --replication-factor 1 --partitions 1
+      kafka-topics --bootstrap-server broker:29092 --create --if-not-exists --topic transaction.funding.entity-groups --replication-factor 1 --partitions 1
+
+      echo -e 'Successfully created the following topics:'
+      kafka-topics --bootstrap-server broker:29092 --list
+      "
+    profiles:
+      - funding-group-consumer
+
+  schema-registry:
+    image: ghcr.io/aiven-open/karapace:3.9.0
+    entrypoint:
+      - /bin/bash
+      - /opt/karapace/start.sh
+      - registry
+    environment:
+      KARAPACE_ADVERTISED_HOSTNAME: schema-registry
+      KARAPACE_BOOTSTRAP_URI: broker:29092
+      KARAPACE_COMPATIBILITY: FULL_TRANSITIVE
+      KARAPACE_HOST: 0.0.0.0
+      KARAPACE_LOG_LEVEL: WARNING
+      KARAPACE_PORT: 8081
+    expose:
+      - "8081"
+    depends_on:
+      - zookeeper
+      - broker
+    profiles:
+      - funding-group-consumer
+      - integration-test
+
+  kafka-api:
+    image: ${REPOSITORY_URL}confluentinc/cp-kafka-rest:7.5.1
+    environment:
+      KAFKA_REST_BOOTSTRAP_SERVERS: broker:29092
+      KAFKA_REST_HOST_NAME: localhost
+      KAFKA_REST_LISTENERS: http://kafka-api:8082
+      KAFKA_REST_SCHEMA_REGISTRY_URL: http://schema-registry:8081
+    expose:
+      - "8082"
+    depends_on:
+      - zookeeper
+      - broker
+      - schema-registry
+    profiles:
+      - funding-group-consumer
+      - integration-test
+
+  control-center:
+    image: ${REPOSITORY_URL}confluentinc/cp-enterprise-control-center:7.5.1
+    environment:
+      CONTROL_CENTER_BOOTSTRAP_SERVERS: 'broker:29092'
+      CONTROL_CENTER_SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      CONTROL_CENTER_REPLICATION_FACTOR: 1
+      CONTROL_CENTER_INTERNAL_TOPICS_PARTITIONS: 1
+      CONTROL_CENTER_MONITORING_INTERCEPTOR_TOPIC_PARTITIONS: 1
+      CONFLUENT_METRICS_TOPIC_REPLICATION: 1
+      PORT: 9021
+    expose:
+      - "9021"
+    depends_on:
+      - broker
+      - schema-registry
+    profiles:
+      - funding-group-consumer

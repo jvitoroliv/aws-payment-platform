@@ -1,0 +1,12 @@
+{
+  "extends": "recommended-jenkinsfile",
+  "rules": {
+    "DuplicateMapLiteral": "info",
+    "CatchException": {
+      "enabled": false
+    },
+    "formatting.LineLength": {
+      "enabled": false
+    }
+  }
+}

@@ -1,0 +1,22 @@
+# opslevel-schema.yml — opslevel-schema configuration
+
+# opslevel-schema.yml — opslevel-schema configuration
+
+---
+name: OpsLevel Schema Validator
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "**/opslevel.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "**/opslevel.yml"
+
+jobs:
+  validate-opslevel-schema:
+    uses: example-org/shared-workflows/.github/workflows/validate-opslevel-schema.yml@main

@@ -1,0 +1,25 @@
+# pre-commit.yml
+# pre-commit configuration
+# Maintained by: Platform Engineering
+
+# pre-commit.yml — pre-commit configuration
+
+name: pre-commit
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  pre-commit:
+    runs-on: [tag-dev]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v3
+
+      - name: pre-commit
+        uses: pre-commit/action@v3.0.0

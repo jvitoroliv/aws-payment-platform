@@ -1,0 +1,109 @@
+# deploy.yml
+# deployment automation
+
+name: Deploy Workflow
+
+on:
+  workflow_dispatch:
+    inputs:
+      semantic_version:
+        description: 'Semantic version for tagging'
+        required: true
+        default: '1.0.0'
+        type: string
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  ci:
+    name: CI Pipeline
+    runs-on: ["tag-dev", "self-hosted"]
+    steps:
+      - name: Set permissions to allow checkout action to clean the workspace
+        run: |
+          sudo chmod -R ug+rwX ${GITHUB_WORKSPACE}
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.19'
+
+      - name: Pull Dependencies
+        run: make ci-pull
+
+      - name: Build
+        run: make ci-build
+
+      - name: Test
+        run: make ci-test
+
+      - name: Cleanup
+        if: always()
+        run: make ci-cleanup
+
+      - name: Test Summary
+        run: |
+          echo "## CI Pipeline Results" >> $GITHUB_STEP_SUMMARY
+          echo "| Step | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "| ---- | ------ |" >> $GITHUB_STEP_SUMMARY
+          echo "| Build | ✅ Passed |" >> $GITHUB_STEP_SUMMARY
+          echo "| Tests | ✅ Passed |" >> $GITHUB_STEP_SUMMARY
+
+  create-git-tag:
+    name: Create Git Tag
+    needs: ci
+    runs-on: ["tag-dev", "self-hosted"]
+    steps:
+      - name: Set permissions to allow checkout action to clean the workspace
+        run: |
+          sudo chmod -R ug+rwX ${GITHUB_WORKSPACE}
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.19'
+
+      - name: Get Repository Name
+        id: repo-name
+        run: |
+          REPO_NAME=$(basename ${{ github.repository }})
+          echo "REPO_NAME=$REPO_NAME" >> $GITHUB_OUTPUT
+          echo "Repository name: $REPO_NAME"
+
+      - name: Create Git Tag
+        run: make ci-create-tag
+        env:
+          VERSION: ${{ inputs.semantic_version }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Deployment Summary
+        run: |
+          echo "## Deploy Workflow Results" >> $GITHUB_STEP_SUMMARY
+          echo "| Step | Status | Details |" >> $GITHUB_STEP_SUMMARY
+          echo "| ---- | ------ | ------- |" >> $GITHUB_STEP_SUMMARY
+          echo "| Build | ✅ Passed | Build completed successfully |" >> $GITHUB_STEP_SUMMARY
+          echo "| Tests | ✅ Passed | Tests completed successfully |" >> $GITHUB_STEP_SUMMARY
+          echo "| Git Tag Creation | ✅ Completed | Created tag v${{ inputs.semantic_version }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Tag Information" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version:** v${{ inputs.semantic_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Repository:** ${{ steps.repo-name.outputs.REPO_NAME }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY

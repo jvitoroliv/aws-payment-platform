@@ -1,0 +1,13 @@
+environment               = "prod"
+region                    = "us-east-1"
+subnet_ids                = ["subnet-0example000000001", "subnet-0example000000002", "subnet-0example000000003"]
+vpc_id                    = "vpc-0example000000001"
+aws_account_number        = "222222222222"
+mongo_uri                 = "mongodb+srv://cluster-prod.example.mongodb.net/test?retryWrites=true&w=majority"
+mongo_username            = "chronos"
+artifact_bucket           = "prod-us-east-1-app-artifacts-lambda"
+aging_event_sns_topic_arn = "arn:aws:sns:us-east-1:999999999999:prod-us-east-1-aging-event"
+card-processor_queue_arn        = "arn:aws:sqs:us-east-1:999999999999:prod-us-east-1-card-processor"
+statements_queue_arn      = "arn:aws:sqs:us-east-1:999999999999:prod-us-east-1-statements"
+memsize                   = 2048
+scheduled_event_enabled   = true

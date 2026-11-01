@@ -1,0 +1,55 @@
+# test-flyway-action.yaml
+# test-flyway-action configuration
+
+---
+name: Test Flyway action
+
+on:
+  pull_request:
+    paths:
+      - '**/flyway/**'
+      - .github/workflows/test-flyway-action.yaml
+  push:
+    branches:
+      - main
+    paths:
+      - '**/flyway/**'
+      - .github/workflows/test-flyway-action.yaml
+
+jobs:
+  test:
+    runs-on: [self-hosted, tag-dev]
+    services:
+      postgres:
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+        image: registry.example.com/postgres:latest
+        options: >-
+          --health-cmd='pg_isready'
+          --health-interval=10s
+          --health-retries=5
+          --health-timeout=5s
+        ports:
+          - 5432
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create PostgreSQL database
+        run: |
+          docker exec ${{ job.services.postgres.id }} psql -U postgres -c 'create database db;'
+
+      - uses: ./flyway
+        with:
+          command: migrate
+          db_database: db
+          db_host: postgres
+          db_password: postgres
+          db_port: 5432
+          db_username: postgres
+          docker_network: ${{ job.services.postgres.network }}
+          image_version: '10.15.0'
+          locations: filesystem:./flyway/sql
+          vault_path: ''

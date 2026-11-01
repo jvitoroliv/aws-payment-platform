@@ -1,0 +1,158 @@
+{
+    "title": "TAG - Endpoint Domain Name Usage",
+    "description": "Displays which domains names are being called for each TAG endpoint",
+    "inputs": {
+        "input_endpoint": {
+            "options": {
+                "items": [
+                    {
+                        "label": "Cards API (Internal)",
+                        "value": "cards-api-internal"
+                    },
+                    {
+                        "label": "Payments API  (Internal)",
+                        "value": "payments-api-internal"
+                    },
+                    {
+                        "label": "TAG API  (Internal)",
+                        "value": "tag-api-internal"
+                    },
+                    {
+                        "label": "TAG Common API  (Internal)",
+                        "value": "tag-common-api-internal"
+                    },
+                    {
+                        "label": "TAG Web  (Internal)",
+                        "value": "tag-web-internal"
+                    },
+                    {
+                        "label": "TAG API (Public)",
+                        "value": "tag-api-public"
+                    },
+                    {
+                        "label": "TAG Common API (Public)",
+                        "value": "tag-common-api-public"
+                    },
+                    {
+                        "label": "TAG Web (Public)",
+                        "value": "tag-web-public"
+                    }
+                ],
+                "selectFirstSearchResult": true,
+                "token": "endpoint"
+            },
+            "title": "Endpoint",
+            "type": "input.dropdown"
+        },
+        "input_env": {
+            "options": {
+                "items": [
+                    {
+                        "label": "Dev",
+                        "value": "dev"
+                    },
+                    {
+                        "label": "Test",
+                        "value": "test"
+                    },
+                    {
+                        "label": "Stage",
+                        "value": "stage"
+                    },
+                    {
+                        "label": "Prod",
+                        "value": "prod"
+                    }
+                ],
+                "selectFirstSearchResult": true,
+                "token": "env"
+            },
+            "title": "Environment",
+            "type": "input.dropdown"
+        },
+        "input_global_trp": {
+            "options": {
+                "defaultValue": "-24h@h,now",
+                "token": "global_time"
+            },
+            "title": "Global Time Range",
+            "type": "input.timerange"
+        }
+    },
+    "defaults": {
+        "dataSources": {
+            "ds.search": {
+                "options": {
+                    "queryParameters": {
+                        "earliest": "$global_time.earliest$",
+                        "latest": "$global_time.latest$"
+                    }
+                }
+            }
+        },
+        "visualizations": {
+            "global": {
+                "showProgressBar": true
+            }
+        }
+    },
+    "visualizations": {
+        "viz_73XNAmPE": {
+            "dataSources": {
+                "primary": "ds_KxXhGrnc"
+            },
+            "options": {
+                "legendTruncation": "ellipsisOff",
+                "xAxisTitleVisibility": "hide",
+                "yAxisTitleVisibility": "hide"
+            },
+            "type": "splunk.line"
+        }
+    },
+    "dataSources": {
+        "ds_KxXhGrnc": {
+            "name": "alb-logs-by-env-and-endpoint",
+            "options": {
+                "query": "index=tag-$env$ sourcetype=\"access_logs\"\n[| makeresults\n | eval env=\"$env$\"\n | eval endpoint=\"$endpoint$\"\n | eval elb=case(\n  env==\"dev\" AND endpoint==\"cards-api-internal\", \"app/dev-ue1-card-service/8305072018d9f55d\",\n  env==\"dev\" AND endpoint==\"payments-api-internal\", \"app/payments-scheduler-dev/e188581e7f9e03fe\",\n  env==\"dev\" AND endpoint==\"tag-api-internal\", \"app/ecs-fgate-alb-api-int-dev/0147f987482be104\",\n  env==\"dev\" AND endpoint==\"tag-common-api-internal\", \"app/ecs-common-api-internal-dev/25e96be534885041\",\n  env==\"dev\" AND endpoint==\"tag-web-internal\", \"app/ecs-fgate-alb-web-intdev/6b678b9c295ae6fd\",\n  env==\"dev\" AND endpoint==\"tag-api-public\", \"app/ecs-fgate-alb-api-dev/669266cb82fe0c7d\",\n  env==\"dev\" AND endpoint==\"tag-common-api-public\", \"app/ecs-common-api-dev/41e9a0f9455e7ce8\",\n  env==\"dev\" AND endpoint==\"tag-web-public\", \"app/ecs-fgate-alb-web-dev/6c0cf9a1b8b4e504\",\n  \n  env==\"test\" AND endpoint==\"cards-api-internal\", \"app/test-ue1-card-service/c38dd53cbe95c1d8\",\n  env==\"test\" AND endpoint==\"payments-api-internal\", \"app/payments-scheduler-test/5e65b84db752af73\",\n  env==\"test\" AND endpoint==\"tag-api-internal\", \"app/ecs-fgate-alb-api-int-test/b735e933f252e824\",\n  env==\"test\" AND endpoint==\"tag-common-api-internal\", \"app/ecs-common-api-internal-test/01dfeba166340d23\",\n  env==\"test\" AND endpoint==\"tag-web-internal\", \"app/ecs-fgate-alb-web-inttest/4649cf172789fbde\",\n  env==\"test\" AND endpoint==\"tag-api-public\", \"app/ecs-fgate-alb-api-test/5c533c48fee285f9\",\n  env==\"test\" AND endpoint==\"tag-common-api-public\", \"app/ecs-common-api-test/fb19e210a265ad82\",\n  env==\"test\" AND endpoint==\"tag-web-public\", \"app/ecs-fgate-alb-web-test/5cfcf7328770920e\",\n  \n  env==\"stage\" AND endpoint==\"cards-api-internal\", \"app/stage-ue1-card-service/f30acd07f85817c1\",\n  env==\"stage\" AND endpoint==\"payments-api-internal\", \"CURRENTLY_NO_PAYMENTS_API_IN_STAGE\",\n  env==\"stage\" AND endpoint==\"tag-api-internal\", \"app/ecs-fgate-alb-api-int-stage/417ad79ab6174286\",\n  env==\"stage\" AND endpoint==\"tag-common-api-internal\", \"app/ecs-common-api-internal-stage/becc632aa82e1afe\",\n  env==\"stage\" AND endpoint==\"tag-web-internal\", \"app/ecs-fgate-alb-web-intstage/33c00d3083349822\",\n  env==\"stage\" AND endpoint==\"tag-api-public\", \"app/ecs-fgate-alb-api-stage/f9205367a5e2e5a9\",\n  env==\"stage\" AND endpoint==\"tag-common-api-public\", \"app/ecs-common-api-stage/af4752039c1cfff6\",\n  env==\"stage\" AND endpoint==\"tag-web-public\", \"app/ecs-fgate-alb-web-stage/90586f7ba94327d9\",\n  \n  env==\"prod\" AND endpoint==\"cards-api-internal\", \"app/prod-ue1-card-service/ee304493a6bff77c\",\n  env==\"prod\" AND endpoint==\"payments-api-internal\", \"app/payments-scheduler-prod/f01816eaa00bc3fb\",\n  env==\"prod\" AND endpoint==\"tag-api-internal\", \"app/ecs-fgate-alb-api-int-prod/ee430691f8ebcdba\",\n  env==\"prod\" AND endpoint==\"tag-common-api-internal\", \"app/ecs-common-api-internal-prod/6b8f1b9524888ec6\",\n  env==\"prod\" AND endpoint==\"tag-web-internal\", \"app/ecs-fgate-alb-web-intprod/9d82f82b73a82dc6\",\n  env==\"prod\" AND endpoint==\"tag-api-public\", \"app/ecs-fgate-alb-api-prod/206e00e683e8c3d1\",\n  env==\"prod\" AND endpoint==\"tag-common-api-public\", \"app/ecs-common-api-prod/580e13c390a76873\",\n  env==\"prod\" AND endpoint==\"tag-web-public\", \"app/ecs-fgate-alb-web-prod/119513f77f7be391\"\n )\n | makemv delim=\",\" elb\n | mvexpand elb\n | fields elb\n | format]\n| eval client_source = case(\n{{CIDRMATCH_SECTION}}\n)\n| eval combined_key=domain_name . \" - \" . client_source\n| timechart limit=0 count by combined_key"
+            },
+            "type": "ds.search"
+        }
+    },
+    "layout": {
+        "globalInputs": [
+            "input_global_trp",
+            "input_env",
+            "input_endpoint"
+        ],
+        "layoutDefinitions": {
+            "layout_1": {
+                "options": {
+                    "height": 960,
+                    "width": 1440
+                },
+                "structure": [
+                    {
+                        "item": "viz_73XNAmPE",
+                        "position": {
+                            "h": 400,
+                            "w": 1440,
+                            "x": 0,
+                            "y": 0
+                        },
+                        "type": "block"
+                    }
+                ],
+                "type": "grid"
+            }
+        },
+        "options": {},
+        "tabs": {
+            "items": [
+                {
+                    "label": "Domains Names calling Endpoint",
+                    "layoutId": "layout_1"
+                }
+            ]
+        }
+    }
+}

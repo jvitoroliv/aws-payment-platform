@@ -1,0 +1,41 @@
+# docker-compose.yml
+# local development environment
+# Maintained by: Platform Engineering
+
+# docker-compose.yml — local development environment
+
+version: "3.5"
+
+services:
+  app-local:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3005:3005"
+    # GitHub Environment — enables deployment protection rules and secrets scoping
+    environment:
+      - NODE_ENV=local
+      - PLATFORM-SERVICES_LOG_NAME=chargebacks.representment.discovery
+      - TAG_API_USERNAME=foo
+      - TAG_API_PASSWORD=bar
+    networks:
+      - local
+    command: npm run app-release
+  unit-tests-local:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - NODE_ENV=local
+      - PLATFORM-SERVICES_LOG_NAME=chargebacks.representment.discovery
+      - TAG_API_USERNAME=foo
+      - TAG_API_PASSWORD=bar
+      - JEST_REPORT_FILE=./coverage/test-report.json
+    ports:
+      - "3005:3005"
+    command: npm run unit-tests-release
+networks:
+  local:
+    external:
+      name: platform-services

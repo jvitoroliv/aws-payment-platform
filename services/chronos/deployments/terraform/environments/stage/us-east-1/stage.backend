@@ -1,0 +1,5 @@
+    encrypt        = true
+    bucket         = "corp-stage-terraform-state-store-us-east-1"
+    dynamodb_table = "tag-stage-state-store"
+    key            = "stage-us-east-1-chronos.tfstate"
+    region         = "us-east-1"

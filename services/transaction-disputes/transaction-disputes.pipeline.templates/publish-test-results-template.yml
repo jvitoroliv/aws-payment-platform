@@ -1,0 +1,42 @@
+# publish-test-results-template.yml
+# publish-test-results-template configuration
+# Maintained by: Platform Engineering
+
+# publish-test-results-template.yml — publish-test-results-template configuration
+
+parameters:
+- name: AGENT_POOL_NAME
+  type: string
+- name: DEPENDENT_JOB_NAME
+  type: string
+- name: JOB_NAME
+  type: string
+
+jobs:
+- job: '${{ parameters.JOB_NAME }}'
+  condition: always()
+  displayName: "Publish test results"
+  dependsOn: '${{ parameters.DEPENDENT_JOB_NAME }}'
+  workspace:
+    clean: all
+  variables:
+    disable.coverage.autogenerate: 'true'
+  pool:
+    name: '${{ parameters.AGENT_POOL_NAME }}'
+
+  steps:
+    - task: DownloadPipelineArtifact@2
+      inputs:
+        path: '$(System.ArtifactsDirectory)'
+      displayName: 'Download test results'
+      enabled: true
+
+    - task: PublishTestResults@2
+      displayName: 'Publish test results'
+      inputs:
+        testResultsFormat: 'VSTest'
+        testResultsFiles: '**/*.trx' 
+        searchFolder: '$(System.ArtifactsDirectory)'
+        mergeTestResults: false
+        failTaskOnFailedTests: true
+      enabled: true

@@ -1,0 +1,38 @@
+# opslevel.yml
+# opslevel configuration
+# Maintained by: Platform Engineering
+
+# opslevel.yml — opslevel configuration
+
+---
+version: 1
+service:
+  name: microservice-card-service
+  lifecycle: pre-alpha
+  tier: tier_4
+  product: The Product Name
+  owner: tag
+  language: golang
+  framework: other
+  description: Card Services
+  aliases:
+    - example-org/microservice-card-service
+  repositories:
+    - name: example-org/microservice-card-service
+      path: "/"
+      provider: github
+  tools:
+    - name: DeepSource
+      category: code
+      url: https://app.deepsource.com/gh/example-org/microservice-card-service
+  dependencies: []
+  tags:
+    - key: containerized
+      value: yes
+    - key: pci
+      value: yes
+    - key: scope
+      value: internal
+    - key: type
+      value: backend
+    

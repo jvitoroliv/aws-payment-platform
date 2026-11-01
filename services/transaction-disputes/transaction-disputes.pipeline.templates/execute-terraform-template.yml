@@ -1,0 +1,129 @@
+# execute-terraform-template.yml
+# execute-terraform-template configuration
+
+parameters:
+- name: AGENT_POOL_NAME
+  type: string
+- name: TERRAFORM_WORKSPACE_NAME
+  type: string
+  values:
+  - test
+  - stage
+  - prod
+  - stagedr
+  - proddr
+- name: TERRAFORM_FILES_DIRECTORY
+  type: string
+- name: TERRAFORM_INIT_CONFIG_FILE
+  type: string
+- name: TERRAFORM_VARIABLE_MAP
+  type: string
+- name: ADO_ENVIRONMENT_NAME
+  type: string
+  values:
+  - Service-Test-Env
+  - Service-Stage-Env
+  - Service-Stage-DR-Env
+  - Service-Prod-Env
+  - Service-Prod-DR-Env
+- name: DEPENDENT_JOB_NAME
+  type: string
+- name: JOB_NAME
+  type: string
+
+jobs:
+- deployment: '${{ parameters.JOB_NAME }}'
+  displayName: "Execute terraform for workspace ${{ parameters.TERRAFORM_WORKSPACE_NAME  }}"
+  workspace:
+    clean: all
+  variables:
+    buildContainerName: '$(Build.BuildNumber)_build_container'
+    buildContainerTerraformDirectoryName: 'terraform'
+  dependsOn:  ${{ parameters.DEPENDENT_JOB_NAME }}
+  # GitHub Environment — enables deployment protection rules and secrets scoping
+  environment: ${{ parameters.ADO_ENVIRONMENT_NAME }}
+  pool:
+    name: ${{ parameters.AGENT_POOL_NAME }}
+
+  strategy:
+    runOnce:
+      deploy:
+        steps:
+        - checkout: self
+          clean: true
+          displayName: 'Checkout the source repository'
+
+        - task: Docker@0
+          inputs:
+            containerregistrytype: Container Registry
+            action: Run a Docker command
+            customCommand: image build -t $(buildContainerName) --label "$(Build.BuildNumber)" -f payment-service.pipeline.templates/BuildContainer_Dockerfile payment-service.pipeline.templates
+          displayName: Create build container
+          enabled: true
+
+        - task: Docker@0
+          inputs:
+            containerregistrytype: Container Registry
+            action: Run a Docker command
+            customCommand: run --privileged -id --name $(buildContainerName) $(buildContainerName)
+          displayName: Run the build container
+          enabled: true
+
+        - task: Docker@0
+          inputs:
+            containerregistrytype: Container Registry
+            action: Run a Docker command
+            customCommand: 'cp $(System.DefaultWorkingDirectory)/${{ parameters.TERRAFORM_FILES_DIRECTORY }} $(buildContainerName):/$(buildContainerTerraformDirectoryName)'
+          displayName: Copy Terraform files into build container
+          enabled: true
+
+        - task: Docker@0
+          retryCountOnTaskFailure: 3
+          inputs:
+            containerregistrytype: Container Registry
+            action: Run a Docker command
+            customCommand: 'exec --privileged -w /$(buildContainerTerraformDirectoryName) $(buildContainerName) terraform init -input=false -backend-config=${{ parameters.TERRAFORM_INIT_CONFIG_FILE }}'
+          displayName: Initialize Terraform
+          enabled: true
+
+        - task: Docker@0
+          inputs:
+            containerregistrytype: Container Registry
+            action: Run a Docker command
+            customCommand: 'exec --privileged -w /$(buildContainerTerraformDirectoryName) $(buildContainerName) /bin/sh -c "terraform workspace select -or-create=true ${{ parameters.TERRAFORM_WORKSPACE_NAME }}"'
+          displayName: 'Setup Terraform workspace for ${{ parameters.TERRAFORM_WORKSPACE_NAME }}'
+          enabled: true
+
+        - task: Docker@0
+          inputs:
+            containerregistrytype: Container Registry
+            action: Run a Docker command
+            customCommand: 'exec --privileged -w /$(buildContainerTerraformDirectoryName) $(buildContainerName) terraform plan -input=false -out deploy.tfplan -var variable_map={${{ parameters.TERRAFORM_VARIABLE_MAP }}}'
+          displayName: Create Terraform plan
+          enabled: true
+
+        - task: Docker@0
+          inputs:
+            containerregistrytype: Container Registry
+            action: Run a Docker command
+            customCommand: 'exec --privileged -w /$(buildContainerTerraformDirectoryName) $(buildContainerName) terraform apply -input=false deploy.tfplan'
+          displayName: Apply Terraform plan
+          enabled: true
+
+        - task: Docker@0
+          condition: always()
+          inputs:
+            containerregistrytype: Container Registry
+            action: Run a Docker command
+            customCommand: stop $(buildContainerName)
+          displayName: Stop container
+          enabled: true
+
+        - task: Docker@0
+          condition: always()
+          inputs:
+            containerregistrytype: Container Registry
+            action: Run a Docker command
+            customCommand: rm --force $(buildContainerName)
+          displayName: Remove container
+          enabled: true

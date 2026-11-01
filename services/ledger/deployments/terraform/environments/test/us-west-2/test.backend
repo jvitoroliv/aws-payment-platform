@@ -1,0 +1,5 @@
+    encrypt        = true
+    bucket         = "corp-subprod-terraform-state-store-us-west-2"
+    dynamodb_table = "tag-subprod-state-store"
+    key            = "test-ledger.tfstate"
+    region         = "us-west-2"

@@ -1,0 +1,73 @@
+# NightlyTestsGenerateCoverage.yaml — security group rules
+
+# NightlyTestsGenerateCoverage.yaml — security group rules
+
+variables:
+  CoverageResultsFolder: 'd:\coverage\Results'
+   
+trigger: none
+
+schedules:
+- cron: '0 1 * * 1,2,3,4,5'
+  displayName: weekdays 1.00AM UTC
+  branches:
+    include:
+    - Major
+    
+jobs:
+- job: Nightly_Tests_Generate_Converage_Job
+  displayName: Nightly Tests Generate Converage Job
+  timeoutInMinutes: 0
+  pool:
+    name: CoreService-Nightly
+    demands: msbuild
+  workspace:
+    clean: all
+  steps:
+  - checkout: self
+    persistCredentials: True
+    
+  - task: MSBuild@1
+    displayName: Build solution NightlyTests.proj
+    inputs:
+      solution: NightlyTests.proj
+      msbuildVersion: 17.0
+      platform: Any CPU
+      configuration: Release
+      
+  - task: PowerShell@2
+    displayName: 'PowerShell: Run code coverage'
+    inputs:
+      filePath: src\coverage\coverage.ps1
+      
+  - task: PublishTestResults@2
+    displayName: Publish Test Results *MSTest.TestResults.trx
+    inputs:
+      testRunner: VSTest
+      testResultsFiles: '*MSTest.TestResults.trx'
+      searchFolder: $(CoverageResultsFolder)
+      mergeTestResults: true
+      testRunTitle: MSTest Tests
+      
+  - task: PublishTestResults@2
+    displayName: Publish Test Results *NUnit.TestResults.xml
+    inputs:
+      testRunner: NUnit
+      testResultsFiles: '*NUnit.TestResults.xml'
+      searchFolder: $(CoverageResultsFolder)
+      testRunTitle: NUnit Tests
+      
+  - task: PublishCodeCoverageResults@1
+    displayName: Publish code coverage from $(CoverageResultsFolder)\ReportGeneratorOutput\Cobertura.xml
+    inputs:
+      codeCoverageTool: Cobertura
+      summaryFileLocation: $(CoverageResultsFolder)\ReportGeneratorOutput\Cobertura.xml     
+     
+  - task: NDependTask@1
+    displayName: 'NDependTask '
+    inputs:
+      viewname: CoreService
+      iscoverage: true
+      coverage: $(CoverageResultsFolder)
+    env:
+      System_AccessToken: $(System.AccessToken)

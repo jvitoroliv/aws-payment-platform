@@ -1,0 +1,34 @@
+aiven_schema_registry_port                 = 17963
+aws_account_number                         = "333333333333"
+aws_private_subnets                        = ["subnet-0example000000001", "subnet-0example000000002", "subnet-0example000000003"]
+aws_public_subnets                         = ["subnet-0example000000004", "subnet-0example000000005", "subnet-0example000000006"]
+aws_region                                 = "us-west-2"
+aws_vpc_id                                 = "vpc-0example000000001"
+base_url                                   = "stage.platform.example.com"
+core_services_cidr                         = "10.94.4.0/22"
+dc2_network                                = []
+dd_tag_cardinality                         = "orchestrator"
+dns_zone_id                                = "Z0EXAMPLE000000"
+email_domain                               = "stage.platform.example.com"
+environment                                = "stage"
+ingress_allowlists_api_alb                 = ["stage-tag-api-public-alb-ingress"]
+ingress_allowlists_api_internal_alb        = ["stage-tag-api-internal-alb-ingress"]
+ingress_allowlists_web_alb                 = ["stage-tag-web-public-alb-ingress"]
+ingress_allowlists_web_internal_alb        = ["stage-tag-web-internal-alb-ingress"]
+ingress_allowlists_common_api_alb          = ["stage-tag-common-api-public-alb-ingress"]
+ingress_allowlists_common_api_internal_alb = ["stage-tag-common-api-internal-alb-ingress"]
+internal_sftp_publickeys                   = []
+internal_sftp_users                        = []
+internal_ssl_cert_arn                      = "arn:aws:acm:us-east-1:999999999999:certificate/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" # Combined cert: *.internal.stage.platform.example.com and *.stage.platform.example.com
+public_ssl_cert_arn                        = "arn:aws:acm:us-east-1:999999999999:certificate/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" # *.stage.platform.example.com
+sftp_vpc_endpoint_id                       = ""
+
+api_min_capacity         = 0
+common_api_min_capacity  = 0
+job_count                = 0
+payment_api_min_capacity = 0
+web_min_capacity         = 0
+# finserv_job_count          = 4
+finserv_job_count = 0
+
+create_sftp_module = false

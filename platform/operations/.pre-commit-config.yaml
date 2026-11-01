@@ -1,0 +1,34 @@
+# All hooks are also run in CI
+# If new hooks are added and require additional libraries:
+#   - Update the appropriate README.md
+#   - Update the docker/Dockerfile.tag-terraform file and rebuild the image
+#     (https://ci.apps.example.com/job/tag-terraform%20Docker%20builder/)
+#     ** NOTE ** The Jenkin job builds against the master branch by default, so
+#     you will need to run the job manually and select your branch that contains
+#     the updated Dockerfile
+repos:
+  - repo: https://github.com/gruntwork-io/pre-commit
+    rev: v0.1.28 # Get the latest from: https://github.com/gruntwork-io/pre-commit/releases
+    hooks:
+      - id: terraform-fmt
+  - repo: https://github.com/antonbabenko/pre-commit-terraform
+    rev: v1.98.1 # Get the latest from: https://github.com/antonbabenko/pre-commit-terraform/releases
+    hooks:
+      - id: terraform_tflint
+        args:
+          - --args=--config=__GIT_WORKING_DIR__/.tflint.hcl
+      - id: terraform_validate
+        args:
+          - --hook-config=--retry-once-with-cleanup=true
+          - --tf-init-args=-backend=false
+          - --tf-init-args=-upgrade
+        exclude: |
+          (?x)^(
+              terraform\/modules\/.*|
+              \.terraform\/.*
+          )$
+  - repo: https://github.com/dnephin/pre-commit-golang
+    rev: v0.5.1
+    hooks:
+      - id: go-unit-tests
+        always_run: true

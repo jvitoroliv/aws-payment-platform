@@ -1,0 +1,62 @@
+# pull-request-tracker.yml — pull-request-tracker configuration
+
+# pull-request-tracker.yml — pull-request-tracker configuration
+
+name: Pull Request Tracker
+on:
+  pull_request:
+    types: [opened, reopened, closed]
+jobs:
+  gchat_notifications:
+    runs-on: coreplatform-dev
+    steps:
+    - name: Git PR Details
+      run: |
+          echo "action: ${{ github.event.action }}"
+          echo "PR creator: ${{ github.event.pull_request.user.login }}"
+          echo "PR title: ${{ github.event.pull_request.title }}"
+          echo "PR number: ${{ github.event.pull_request.number }}"
+          echo "PR url: ${{ github.event.pull_request.html_url }}"
+          echo "PR body: ${{ github.event.pull_request.body }}"
+          echo "PR author: ${{ github.event.pull_request.user.name }}"
+          echo "PR body: ${{ github.event.pull_request.base.repo.name }}"
+          echo "PR branch: ${{ github.event.pull_request.branch }}"
+          echo "user avatar: ${{ github.event.pull_request.base.user.avatar }}"
+          echo "merged ${{ github.event.pull_request.merged }}"
+          echo "merged ${{ github.event.pull_request != null }}"     
+
+  run-action:
+    name: Run action
+    runs-on: coreplatform-dev
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Node.js 16.x
+        uses: actions/setup-node@v4
+        with:
+            node-version: 20.x
+            cache: 'npm'
+            cache-dependency-path: package-lock.json
+        
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Run my action
+        uses: ./
+        with: 
+          action: ${{ github.event.action }}
+          prCreator: ${{ github.event.pull_request.user.login }}
+          prTitle: ${{ github.event.pull_request.title }}
+          prNumber: ${{ github.event.pull_request.number }}
+          prURL: ${{ github.event.pull_request.html_url }}
+          prBody: ${{ github.event.pull_request.body }}
+          prAuthor: ${{ github.event.pull_request.user.name }}
+          repoName: ${{ github.event.pull_request.base.repo.name }}
+          prBranch: ${{ github.event.pull_request.branch }}
+          merged: ${{ github.event.pull_request.merged }}
+          ghToken: ${{ secrets.PAT_GITHUB }}
+          webhook: ${{ secrets.WEBHOOK }}
+          isPullRequestTracker: true

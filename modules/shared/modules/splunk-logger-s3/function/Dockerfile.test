@@ -1,0 +1,22 @@
+FROM registry.example.com/python:3.13-slim
+
+WORKDIR /app
+
+# Install test dependencies
+RUN pip install --no-cache-dir \
+    coverage \
+    mock \
+    pytest \
+    pytest-cov
+
+# Install AWS dependencies
+RUN pip install --no-cache-dir \
+    boto3 \
+    urllib3
+
+# Copy source code and tests
+COPY src/ ./src/
+COPY tests/ ./tests/
+
+# Run tests explicitly
+CMD ["python", "-m", "unittest", "tests/test_aws_alb_logs.py"]

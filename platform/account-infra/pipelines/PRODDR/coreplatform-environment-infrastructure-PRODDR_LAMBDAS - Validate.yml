@@ -1,0 +1,84 @@
+# coreplatform-environment-infrastructure-PRODDR_LAMBDAS - Validate.yml
+# Lambda function definitions
+# Maintained by: Platform Engineering
+
+# coreplatform-environment-infrastructure-PRODDR_LAMBDAS - Validate.yml — Lambda function definitions
+
+name: $(BuildDefinitionName)_$(Date:yyyMMdd)$(rev:.rr)
+
+parameters:
+- name: Environment
+  default: 'PRODDR_LAMBDAS'
+
+trigger: none
+
+resources:
+  pipelines:
+    - pipeline: LambdaArtifactPipeline
+      source: coreplatform-account-infrastructure-drainqueuetos3
+      #TODO: Uncomment this once the above pipeline has made it to master
+      #branch: master
+
+variables:
+- name: LambdaArtifactName
+  value: LambdaArtifact
+  readonly: true
+- name: LambdaFilename
+  value: DrainQueueToS3.zip
+  readonly: true
+
+stages:
+- stage: Stage_DeployToPRODDR
+  displayName: Deploy to PRODDR - Validate Only
+  jobs:
+    - deployment: DeployToPRODDR
+      displayName: Deploy to PRODDR - Validate Only
+      # GitHub Environment — enables deployment protection rules and secrets scoping
+      environment: enc-proddr-env
+      pool: CpAWS-PRODDR
+      workspace:
+        clean: all
+      strategy:
+        runOnce:
+          deploy:
+            steps:
+              - checkout: self
+                path: Application
+                displayName: Checkout the source repository
+
+              - download: LambdaArtifactPipeline
+                artifact: $(LambdaArtifactName)
+                displayName: Download the lambda artifact
+
+              - powershell: |
+                  dir env:
+                displayName: Display all environment variables
+
+              - script: |
+                  dir /s
+                condition: eq(variables['System.debug'], 'true')
+                displayName: List agent files
+
+              - script: |
+                  dir /s
+                workingDirectory: $(Pipeline.Workspace)/LambdaArtifactPipeline/$(LambdaArtifactName)
+                condition: eq(variables['System.debug'], 'true')
+                displayName: List agent artifact files
+
+              - script: |
+                  copy $(LambdaFilename) $(System.DefaultWorkingDirectory)\env\$(Environment)
+                workingDirectory: $(Pipeline.Workspace)/LambdaArtifactPipeline/$(LambdaArtifactName)
+                displayName: Copy lambda zip file into terraform folder
+
+              # Prefix git urls in tf with the SYSTEM_ACCESSTOKEN
+              - template: ../templates/rewriteTerraformGitUrlsToIncludeToken.yml
+
+              - script: |
+                  terraform init -input=false
+                workingDirectory: '$(System.DefaultWorkingDirectory)\env\$(Environment)'
+                displayName: terraform init
+          
+              - script: |
+                  terraform plan -out terraform.tfplan
+                workingDirectory: '$(System.DefaultWorkingDirectory)\env\$(Environment)'
+                displayName: terraform plan

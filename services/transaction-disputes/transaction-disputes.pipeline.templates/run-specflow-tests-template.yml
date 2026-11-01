@@ -1,0 +1,128 @@
+# run-specflow-tests-template.yml
+# run-specflow-tests-template configuration
+# Maintained by: Platform Engineering
+
+# run-specflow-tests-template.yml — run-specflow-tests-template configuration
+
+parameters:
+- name: TEST_PROJECT_NAME
+  type: string
+- name: DOTNET_ENVIRONMENT_NAME
+  type: string
+- name: TEST_FILTER_CRITERIA
+  type: string
+- name: TEST_RESULTS_ARTIFACT_NAME
+  type: string
+- name: AGENT_POOL_NAME
+  type: string
+- name: ADO_ENVIRONMENT_NAME
+  type: string
+  values:
+  - Service-Test-Env
+  - Service-Stage-Env
+  - Service-Prod-Env
+- name: DEPENDENT_JOB_NAME
+  type: string
+- name: JOB_NAME
+  type: string
+- name: JOB_DISPLAY_NAME
+  type: string
+
+jobs:
+- deployment: '${{ parameters.JOB_NAME }}'
+  displayName: '${{ parameters.JOB_DISPLAY_NAME }}'
+  workspace:
+    clean: all
+  variables:
+    buildContainerName: '$(Build.BuildNumber)_build_container'
+    buildContainerSourceFolderName: 'src'
+    testResultsFolderName: 'TestResults'
+    coverageResultsFolderName: 'CoverageResults'
+  dependsOn:  ${{ parameters.DEPENDENT_JOB_NAME }}
+  # GitHub Environment — enables deployment protection rules and secrets scoping
+  environment: ${{ parameters.ADO_ENVIRONMENT_NAME }}
+  pool:
+    name: ${{ parameters.AGENT_POOL_NAME }}
+
+  strategy:
+    runOnce:
+      deploy:
+        steps:
+        - checkout: self
+          clean: true
+          displayName: 'Checkout the source repository'
+
+        - task: Docker@0
+          inputs:
+            containerregistrytype: Container Registry
+            action: Run a Docker command
+            customCommand: image build -t $(buildContainerName) --label "$(Build.BuildNumber)" -f payment-service.pipeline.templates/BuildContainer_Dockerfile payment-service.pipeline.templates
+          displayName: Create build container
+          enabled: true
+
+        - task: Docker@0
+          inputs:
+            containerregistrytype: Container Registry
+            action: Run a Docker command
+            customCommand: run --privileged --env DOTNET_ENVIRONMENT=${{ parameters.DOTNET_ENVIRONMENT_NAME }} --network host --env PIPELINE_BUILD_NUMBER=$(Build.BuildNumber) -id --name $(buildContainerName) $(buildContainerName)
+          displayName: Run the build container (setting DOTNET_ENVIRONMENT)
+          enabled: true
+
+        - task: Docker@0
+          inputs:
+            containerregistrytype: Container Registry
+            action: Run a Docker command
+            customCommand: cp $(System.DefaultWorkingDirectory) $(buildContainerName):/$(buildContainerSourceFolderName)
+          displayName: Copy source code to build container
+          enabled: true
+
+        - task: Docker@0
+          inputs:
+            containerregistrytype: Container Registry
+            action: Run a Docker command
+            customCommand: 'exec --privileged -w /$(buildContainerSourceFolderName)/${{ parameters.TEST_PROJECT_NAME }} $(buildContainerName) dotnet build -c Release -p:WebDriverPlatform=linux64 -p:GeckoDriverPlatform=linux64 -warnaserror'
+          displayName: Build test project
+          enabled: true
+
+        - task: Docker@0
+          inputs:
+            containerregistrytype: Container Registry
+            action: Run a Docker command
+            customCommand: 'exec --privileged -w /$(buildContainerSourceFolderName)/${{ parameters.TEST_PROJECT_NAME }} $(buildContainerName) dotnet test --configuration Release -p:WebDriverPlatform=linux64 -p:GeckoDriverPlatform=linux64 --filter "${{ parameters.TEST_FILTER_CRITERIA }}" --logger "trx;LogFileName=${{ parameters.TEST_PROJECT_NAME }}.$(testResultsFolderName).trx" --logger "console;verbosity=detailed" --settings integration-tests.runsettings'
+          displayName: Run tests
+          enabled: true
+
+        - task: Docker@0
+          condition: always()
+          inputs:
+            containerregistrytype: Container Registry
+            action: Run a Docker command
+            customCommand: 'cp $(buildContainerName):/$(buildContainerSourceFolderName)/${{ parameters.TEST_PROJECT_NAME }}/$(testResultsFolderName)/. $(System.DefaultWorkingDirectory)/${{ parameters.TEST_PROJECT_NAME }}/$(testResultsFolderName)'
+          displayName: Copy test results to agent machine
+          enabled: true
+
+        - task: PublishPipelineArtifact@1
+          condition: always()
+          inputs:
+            path: $(System.DefaultWorkingDirectory)/${{ parameters.TEST_PROJECT_NAME }}/$(testResultsFolderName)
+            artifactName: ${{ parameters.TEST_RESULTS_ARTIFACT_NAME }}
+          displayName: Publish test artifacts
+          enabled: true
+
+        - task: Docker@0
+          condition: always()
+          inputs:
+            containerregistrytype: Container Registry
+            action: Run a Docker command
+            customCommand: stop $(buildContainerName)
+          displayName: Stop container
+          enabled: true
+
+        - task: Docker@0
+          condition: always()
+          inputs:
+            containerregistrytype: Container Registry
+            action: Run a Docker command
+            customCommand: rm --force $(buildContainerName)
+          displayName: Remove container
+          enabled: true

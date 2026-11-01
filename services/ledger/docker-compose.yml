@@ -1,0 +1,153 @@
+# docker-compose.yml — local development environment
+
+# docker-compose.yml — local development environment
+
+version: '3.9'
+
+services:
+  ledger-producer:
+    image: "${DOCKER_REGISTRY-registry.example.io/docker-nonprod/app/}ledger-producer:${VERSION:-local}"
+    build:
+      context: ./
+      dockerfile: Dockerfile
+      args:
+        BUILDARCH: amd64
+    # GitHub Environment — enables deployment protection rules and secrets scoping
+    environment:
+      - CONFIG_PATH=/app/
+      - ENVIRONMENT=docker
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://datadog-agent:4317
+    depends_on:
+      mongo-database:
+        condition: service_healthy
+      karapace-registry:
+        condition: service_started
+      kafka:
+        condition: service_healthy
+#      datadog-agent:
+#        condition: service_healthy
+    volumes:
+      - ./:/debug
+
+  builder:
+    image: "${DOCKER_REGISTRY-registry.example.io/docker-nonprod/app/tag-utilities/}builder:1.21.3"
+    depends_on:
+      mongo-database:
+        condition: service_healthy
+      karapace-registry:
+        condition: service_started
+      kafka:
+        condition: service_healthy
+    environment:
+      - GOCACHE=/go/src/github.com/example-org/ps-tag-ledger/.cache
+      - CGO_ENABLED=1
+      - GIT_COMMIT="${GIT_COMMIT:-local}"
+      - GO_ARGS=${GO_ARGS}
+      - GOBIN=/go/src/github.com/example-org/ps-tag-ledger
+      - CONFIG_PATH=/go/src/github.com/example-org/ps-tag-ledger/config
+      - ENVIRONMENT=docker
+    volumes:
+      - ./:/go/src/github.com/example-org/ps-tag-ledger
+      - ./.mod:/go/pkg/mod
+    command:
+      - tail
+      - -f
+      - /dev/null
+    working_dir: /go/src/github.com/example-org/ps-tag-ledger
+
+#  datadog-agent:
+#    image: gcr.io/datadoghq/agent:7
+#    environment:
+#      - DD_API_KEY=<DATADOG-API-KEY> # You can use tag-dev api key locally
+#      - DD_HOSTNAME=ledger-producer-local-testing
+#      - DD_ENV=local
+#      - DD_OTLP_CONFIG_RECEIVER_PROTOCOLS_GRPC_ENDPOINT=datadog-agent:4317
+#    expose:
+#      - 4317
+#    profiles:
+#      [ "local" ]
+
+  zookeeper:
+    image: registry.example.io/tag-docker-nonprod-virtual-us/bitnami/zookeeper:latest
+    expose:
+      - 2181
+    environment:
+      - ALLOW_ANONYMOUS_LOGIN=yes
+
+  kafka:
+    image: registry.example.io/tag-docker-nonprod-virtual-us/bitnami/kafka:3.1.2
+    expose:
+      - 7777
+      - 27777
+    depends_on:
+      - zookeeper
+    environment:
+      - KAFKA_CFG_ZOOKEEPER_CONNECT=zookeeper:2181
+      - ALLOW_PLAINTEXT_LISTENER=yes
+      - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=CLIENT:PLAINTEXT,EXTERNAL:PLAINTEXT
+      - KAFKA_CFG_LISTENERS=CLIENT://:7777,EXTERNAL://:27777
+      - KAFKA_CFG_ADVERTISED_LISTENERS=CLIENT://kafka:7777,EXTERNAL://kafka:27777
+      - KAFKA_CFG_INTER_BROKER_LISTENER_NAME=CLIENT
+      - KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE=true
+      - KAFKA_CFG_OFFSETS_REPLICATION_FACTOR=1
+      - KAFKA_CFG_CONFLUENT_SCHEMA_REGISTRY_URL=http://karapace-registry:7878
+      - KAFKA_CFG_NUM_PARTITIONS=3
+    healthcheck:
+      test: /opt/bitnami/kafka/bin/kafka-topics.sh
+        --list --bootstrap-server localhost:27777
+      interval: 20s
+      timeout: 15s
+      retries: 6
+
+  karapace-registry:
+    image: ghcr.io/aiven-open/karapace:3.9.0
+    entrypoint:
+      - /bin/bash
+      - /opt/karapace/start.sh
+      - registry
+    depends_on:
+      - kafka
+      - mongo-database
+    expose:
+      - 7878
+    environment:
+      KARAPACE_ADVERTISED_HOSTNAME: karapace-registry
+      KARAPACE_BOOTSTRAP_URI: kafka:27777
+      KARAPACE_PORT: 7878
+      KARAPACE_HOST: 0.0.0.0
+      KARAPACE_CLIENT_ID: karapace
+      KARAPACE_GROUP_ID: karapace-registry
+      KARAPACE_MASTER_ELIGIBITY: "true"
+      KARAPACE_TOPIC_NAME: _schemas
+      KARAPACE_LOG_LEVEL: WARNING
+      KARAPACE_COMPATIBILITY: FORWARD_TRANSITIVE
+
+  kafka-ui:
+    image: registry.example.io/tag-docker-nonprod-virtual-us/provectuslabs/kafka-ui:v0.7.1
+    ports:
+      - "8080"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:27777
+      KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
+      KAFKA_CLUSTERS_0_SCHEMAREGISTRY: http://karapace-registry:7878
+    profiles:
+      [ "local" ]
+
+  mongo-database:
+    image: registry.example.io/tag-docker-nonprod-virtual-us/mongo:7.0
+    command: ["--replSet", "rs0"]
+    volumes:
+      - ./tests/database:/jsfiles
+    working_dir: /jsfiles
+    expose:
+      - 27017
+    healthcheck:
+      test: echo "try { rs.status() } catch (err) { rs.initiate({_id:'rs0',members:[{_id:0,host:'mongo-database:27017'}]}); while (! db.hello().isWritablePrimary ) sleep(1); }" | mongosh --port 27017 --quiet
+      interval: 10s
+      timeout: 5s
+      start_period: 0s
+      retries: 4

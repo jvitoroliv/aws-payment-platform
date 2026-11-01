@@ -1,0 +1,401 @@
+# CorePlatformBuild.yaml — build pipeline
+
+# CorePlatformBuild.yaml — build pipeline
+
+name: $(date:yyyyMMdd).$(BuildId)
+
+trigger: none
+
+schedules:
+- cron: '0 6 * * 1,2,3,4,5'
+  displayName: weekdays 6.00AM UTC
+  branches:
+    include:
+    - Major
+    
+resources:
+  repositories:
+    - repository: coreplatform-AMIs
+      type: github
+      endpoint: example-org
+      name: example-org/coreplatform-AMIs
+
+variables:
+- group: CpAWS-PrimaryRegion
+- group: Octopus
+- name: Configuration
+  value: Release
+# Variable 'BuildAll' is defined in the UI because it is settable at queue time
+
+stages:
+- stage: CoreServiceBuild
+  jobs:
+  - job: Build_CoreService
+    displayName: Build CoreService
+    timeoutInMinutes: 90
+    pool:
+      name: CpAWS-Central
+    steps:        
+    - checkout: self
+      clean: true
+
+    - template: template-steps-Roles_WorkFolder_VersionFile.yaml
+
+    - task: MSBuild@1
+      displayName: Build Transforms
+      inputs:
+        solution: Enc_BuildTransforms.proj
+        platform: Any CPU
+        configuration: $(Configuration)
+
+    - task: MSBuild@1
+      displayName: Build CorePlatform
+      inputs:
+        solution: Enc_BuildCorePlatform.proj
+        platform: Any CPU
+        configuration: $(Configuration)      
+
+    - task: PublishPipelineArtifact@1
+      displayName: Push General Artifacts
+      inputs:
+        targetPath: $(Build.SourcesDirectory)\Work\$(Configuration)\Artifacts\
+        artifact: General
+
+    - task: PublishPipelineArtifact@1
+      displayName: Push CoreService Artifacts
+      inputs:
+        targetPath: $(Build.SourcesDirectory)\Work\$(Configuration)\EncArtifacts\
+        artifact: CoreService
+
+    - task: PowerShell@2
+      displayName: Upload General Artifacts to S3
+      inputs:
+        filePath: deployment/scripts/UploadArtifactsToS3.ps1
+        arguments: $(Build.SourcesDirectory)\Work\$(Configuration)\Artifacts\
+
+    - task: PowerShell@2
+      displayName: Upload CoreService Artifacts to S3
+      inputs:
+        filePath: deployment/scripts/UploadArtifactsToS3.ps1
+        arguments: $(Build.SourcesDirectory)\Work\$(Configuration)\EncArtifacts\
+
+  - job: Build_DataUpdate
+    displayName: Build DataUpdate
+    timeoutInMinutes: 90
+    pool:
+      name: CpAWS-Central
+    steps:        
+    - checkout: self
+      clean: true
+
+    - template: template-steps-Roles_WorkFolder_VersionFile.yaml
+
+    - task: MSBuild@1
+      displayName: Build DataUpdate
+      inputs:
+        solution: Enc_BuildDataUpdate.proj
+        platform: Any CPU
+        configuration: $(Configuration)
+
+    - task: PowerShell@2
+      displayName: Upload DataUpdate Artifacts to S3
+      inputs:
+        filePath: deployment/scripts/UploadArtifactsToS3.ps1
+        arguments: $(Build.SourcesDirectory)\Work\$(Configuration)\DataArtifacts\
+
+    - task: PublishPipelineArtifact@1
+      displayName: Push DataUpdate Artifacts
+      inputs:
+        targetPath: $(Build.SourcesDirectory)\Work\$(Configuration)\DataArtifacts\
+        artifact: DataUpdate
+
+  - job: Build_TaskManagement
+    displayName: Build TaskManagement
+    timeoutInMinutes: 90
+    pool:
+      name: CpAWS-Central
+    steps:        
+    - checkout: self
+      clean: true
+
+    - template: template-steps-Roles_WorkFolder_VersionFile.yaml
+
+    - task: MSBuild@1
+      displayName: Build TaskManagement
+      inputs:
+        solution: Enc_BuildTaskManagement.proj
+        platform: Any CPU
+        configuration: $(Configuration)
+
+    - task: PowerShell@2
+      displayName: Upload TaskManagement Artifacts to S3
+      inputs:
+        filePath: deployment/scripts/UploadArtifactsToS3.ps1
+        arguments: $(Build.SourcesDirectory)\Work\$(Configuration)\JMArtifacts\
+
+    - task: PublishPipelineArtifact@1
+      displayName: Push TaskManagement Artifacts
+      inputs:
+        targetPath: $(Build.SourcesDirectory)\Work\$(Configuration)\JMArtifacts\
+        artifact: TaskManagement
+
+  - job: Build_Misc
+    displayName: Build Misc
+    timeoutInMinutes: 90
+    pool:
+      name: CpAWS-Central
+    steps:        
+    - checkout: self
+      clean: true
+
+    - template: template-steps-Roles_WorkFolder_VersionFile.yaml
+
+    - task: PowerShell@2
+      displayName: Get HelpMappings from S3
+      inputs:
+        filePath: deployment/scripts/AWS_GetHelpMappings.ps1
+        arguments: $(Build.SourcesDirectory)\Work\$(Configuration)\HelpMappings\
+
+    - task: PublishPipelineArtifact@1
+      displayName: Push HelpMappings Artifacts
+      inputs:
+        targetPath: $(Build.SourcesDirectory)\Work\$(Configuration)\HelpMappings\
+        artifact: HelpMappings
+
+    - task: PowerShell@2
+      displayName: Save BuildInfo to file
+      inputs:
+        targetType: inline
+        script: >
+          $buildinfo = @{ BuildNumber="$(Build.BuildNumber)"; SourceBranch="$(Channel)" }
+
+          $buildinfo # show to verify
+
+          $buildinfo | ConvertTo-Json | Out-File "$(Build.SourcesDirectory)\BuildInfo.json"
+
+    - task: PublishPipelineArtifact@1
+      displayName: Push BuildInfo file to artifacts
+      inputs:
+        targetPath: $(Build.SourcesDirectory)\BuildInfo.json
+        artifact: BuildInfo
+
+    - task: PublishPipelineArtifact@1
+      displayName: Push DeploymentScripts to artifacts
+      inputs:
+        targetPath: $(Build.SourcesDirectory)\deployment\scripts\
+        artifact: DeploymentScripts
+
+    - task: PublishPipelineArtifact@1
+      displayName: Push Nuget to artifacts
+      inputs:
+        targetPath: $(Build.SourcesDirectory)\src\Tools\Nuget\
+        artifact: NuGet
+
+    - task: PublishPipelineArtifact@1
+      displayName: Push Octo to artifacts
+      inputs:
+        targetPath: $(Build.SourcesDirectory)\src\Tools\Octopus\
+        artifact: Octo
+
+    - task: PublishPipelineArtifact@1
+      displayName: Push CoreServiceVersion to artifacts
+      inputs:
+        targetPath: $(Build.SourcesDirectory)\_CoreServiceVersion.txt
+        artifact: CoreServiceVersion
+
+    - task: PublishPipelineArtifact@1
+      displayName: Push Roles to artifacts
+      inputs:
+        targetPath: $(Build.SourcesDirectory)\_Roles.lst
+        artifact: Roles
+
+- stage: CoreServiceBuild_OnPremPhase
+  dependsOn: CoreServiceBuild
+  jobs:
+  - job: CoreServiceBuildOnPrem_Job
+    displayName: CoreService Build - On-Prem phase
+    timeoutInMinutes: 90
+    pool:
+      name: CoreService-Code-Deploy
+    steps:
+    - checkout: none
+
+    - task: PowerShell@2
+      displayName: Delete Nupkg folder
+      inputs:
+        targetType: inline
+        script: >
+          $nugetpath = "$(Pipeline.Workspace)\NuGetFiles\"
+
+          If (Test-Path -Path $nugetpath) {
+            Remove-Item -path "$nugetpath" -Recurse
+          }
+
+          New-Item -Path "$(Pipeline.Workspace)" -Name "NuGetFiles" -ItemType "directory"
+
+    - task: DownloadPipelineArtifact@2
+      displayName: Download BuildInfo Artifacts
+      inputs:
+        source: current
+        artifact: BuildInfo
+        path: $(System.ArtifactsDirectory)\BuildInfo
+
+    - task: DownloadPipelineArtifact@2
+      displayName: Download Version Artifacts
+      inputs:
+        source: current
+        artifact: CoreServiceVersion
+        path: $(System.ArtifactsDirectory)\CoreServiceVersion
+
+    - task: PowerShell@2
+      displayName: Version and BuildInfo
+      inputs:
+        targetType: inline
+        script: >+
+          $VersionPath = "$(System.ArtifactsDirectory)\CoreServiceVersion"
+
+          $BuildInfoPath = "$(System.ArtifactsDirectory)\BuildInfo"
+
+          $version = Get-Content "${VersionPath}\_CoreServiceVersion.txt"
+
+          $buildinfo = Get-Content "${BuildInfoPath}\BuildInfo.json" | Out-String | ConvertFrom-Json
+
+          $channel = $buildinfo.SourceBranch
+
+          $buildnumber = $buildinfo.BuildNumber
+
+          $semver = "${version}-${channel}${buildnumber}"
+
+          Write-Host "Version = $version"
+
+          Write-Host "Channel = $channel"
+
+          Write-Host "BuildNumber = $buildnumber"
+
+          Write-Host ""
+
+          Write-Host "SemVer = $semver"
+
+    - task: DownloadPipelineArtifact@2
+      displayName: Download DeploymentScripts Artifacts
+      inputs:
+        source: current
+        artifact: DeploymentScripts
+        path: $(System.ArtifactsDirectory)\DeploymentScripts
+
+    - task: DownloadPipelineArtifact@2
+      displayName: Download NuGet Artifacts
+      inputs:
+        source: current
+        artifact: NuGet
+        path: $(System.ArtifactsDirectory)\NuGet
+
+    - task: DownloadPipelineArtifact@2
+      displayName: Download Octo Artifacts
+      inputs:
+        source: current
+        artifact: Octo
+        path: $(System.ArtifactsDirectory)\Octo
+
+    - task: DownloadPipelineArtifact@2
+      displayName: Download General Artifacts
+      inputs:
+        source: current
+        artifact: General
+        path: $(System.ArtifactsDirectory)\General
+
+    - task: PowerShell@2
+      displayName: NuGet General files
+      inputs:
+        filePath: $(System.ArtifactsDirectory)\DeploymentScripts\OnPrem-CreateNugetFiles.ps1
+        arguments: '"$(System.ArtifactsDirectory)\General" "$(Pipeline.Workspace)\NuGetFiles" "CorePlatform.Transforms:CoreService_Transforms,CorePlatform.DeploymentTools:CoreService_DeploymentTools,CoreService.ACT:CoreService_ApplicationConnectivityTester,CoreService.Executables:CoreService_Executables" "$(System.ArtifactsDirectory)\NuGet"'
+
+    - task: DownloadPipelineArtifact@2
+      displayName: Download CorePlatform Artifacts
+      inputs:
+        source: current
+        artifact: CoreService
+        path: $(System.ArtifactsDirectory)\CoreService    
+
+    - task: PowerShell@2
+      displayName: NuGet CoreService files
+      inputs:
+        filePath: $(System.ArtifactsDirectory)\DeploymentScripts\OnPrem-CreateNugetFiles.ps1
+        arguments: '"$(System.ArtifactsDirectory)\CoreService" "$(Pipeline.Workspace)\NuGetFiles" "CoreService.AFP:CoreService_AFP,CoreService.APP:CoreService_RemoteObjects,CoreService.FAX:CoreService_FaxDispositionService,CoreService.OFFLINE:CoreService_Offline,CoreService.PROC:CoreService_ProcessorService,CoreService.RPT:CoreService_ReportServices,CoreService.SVC:CoreService_WebServices,CoreService.WinServices:CoreService_WinServices,CoreService.WWW:CoreService_WebSite,CoreService.REST:CoreService_RestApi" "$(System.ArtifactsDirectory)\NuGet"'
+
+    - task: DownloadPipelineArtifact@2
+      displayName: Download DataUpdate Artifacts
+      inputs:
+        source: current
+        artifact: DataUpdate
+        path: $(System.ArtifactsDirectory)\DataUpdate
+
+    - task: PowerShell@2
+      displayName: NuGet DataUpdate files
+      inputs:
+        filePath: $(System.ArtifactsDirectory)\DeploymentScripts\OnPrem-CreateNugetFiles.ps1
+        arguments: '"$(System.ArtifactsDirectory)\DataUpdate" "$(Pipeline.Workspace)\NuGetFiles" "CorePlatform.DataUpdate:CoreService_DataUpdate,CorePlatform.Database:CoreService_Database" "$(System.ArtifactsDirectory)\NuGet"'
+
+    - task: DownloadPipelineArtifact@2
+      displayName: Download TaskManagement Artifacts
+      inputs:
+        source: current
+        artifact: TaskManagement
+        path: $(System.ArtifactsDirectory)\TaskManagement
+
+    - task: PowerShell@2
+      displayName: NuGet TaskManagement files
+      inputs:
+        filePath: $(System.ArtifactsDirectory)\DeploymentScripts\OnPrem-CreateNugetFiles.ps1
+        arguments: '"$(System.ArtifactsDirectory)\TaskManagement" "$(Pipeline.Workspace)\NuGetFiles" "TaskManagement.Executables:TaskManagement_Executables,TaskManagement.JobBinaries:TaskManagement_JobBinaries,TaskManagement.WinServices:TaskManagement_WinServices,TaskManagement.ThirdParty:TaskManagement_ThirdParty,TaskManagement.JobExecutables:TaskManager_EXEJobs,TaskManagement.DeploymentTools:TaskManager_DeployJobs,TaskManagement.PreProcVars:TaskManagement_PreProcVars,TaskManagement.JobConfig:TaskManager_BatchConfiguration,TaskManager.Jobs:TaskManager_Jobs" "$(System.ArtifactsDirectory)\NuGet"'      
+
+    - task: CopyFiles@2
+      displayName: Copy Nupkgs to Octopus
+      inputs:
+        SourceFolder: $(Pipeline.Workspace)\NuGetFiles\
+        TargetFolder: $(OctopusFeed)      
+
+    - task: PowerShell@2
+      displayName: Create Octopus Releases
+      inputs:
+        filePath: $(System.ArtifactsDirectory)\DeploymentScripts\OnPrem-CreateOctopusReleases.ps1
+        arguments: '"$(System.ArtifactsDirectory)\BuildInfo" "$(System.ArtifactsDirectory)\CoreServiceVersion" "$(System.ArtifactsDirectory)\Octo"'
+
+- stage: CoreServiceBuild_AWSPhase
+  dependsOn: CoreServiceBuild
+  jobs:
+  - job: Build_CorePlatform_AMI
+    displayName: Build AMI
+    timeoutInMinutes: 1200
+    pool:
+      name: CpAWS-Central
+    strategy:
+      matrix:
+        EncIIS_TEST:
+          AMI: CorePlatformIIS
+          KPK: TEST
+        EncIIS_PROD:
+          AMI: CorePlatformIIS
+          KPK: PROD
+        WinSvc_TEST:
+          AMI: WinService
+          KPK: TEST
+        WinSvc_PROD:
+          AMI: WinService
+          KPK: PROD
+    steps:
+    - checkout: coreplatform-AMIs
+      clean: true
+    - task: DownloadPipelineArtifact@2
+      displayName: Pull BuildInfo file from artifacts
+      inputs:
+        source: current
+        artifact: BuildInfo
+        path: $(Pipeline.Workspace)\BuildInfo
+    - task: PowerShell@2
+      displayName: Packer $(AMI)-$(KPK)
+      inputs:
+        filePath: packer/LocalBakery/scripts/RunPacker.ps1
+        arguments: -BuildInfoPath "$(Pipeline.Workspace)\BuildInfo" -BucketName "$(ArtifactBucketName)" -PackerFilename "CPT-LocalBakery-WIN2019-$(AMI).pkr.hcl" -KPKname "$(KPK)"
+        workingDirectory: packer/LocalBakery
+...

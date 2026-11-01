@@ -1,0 +1,1047 @@
+name: production-orchestrator_$(Date:yyyyMMdd)$(rev:.rrr)
+
+# =============================================================================
+# PRODUCTION ORCHESTRATOR PIPELINE
+# =============================================================================
+# This pipeline deploys multiple ECS services to production with a single approval.
+# It can be triggered automatically by Git tags or run manually.
+#
+# How it works:
+# 1. Trigger: Git tag (v*) or manual run with tag parameter
+# 2. Detect: Identifies which services changed (compares with previous tag)
+# 3. Approve: Single approval gate for all services
+# 4. Deploy: Each job waits for its artifact, then deploys to target environment
+# =============================================================================
+
+trigger:
+  tags:
+    include:
+      - v*  # Configurable prefix - change here if needed
+
+pr: none
+
+parameters:
+  # Target environment - use Test for testing, Prod for real deployments
+  - name: target_environment
+    displayName: 'Target Environment'
+    type: string
+    default: 'Prod'
+    values:
+      - Test
+      - Stage
+      - Prod
+
+  # Manual tag input - use this when running manually
+  - name: release_tag
+    displayName: 'Release Tag (leave empty for automatic from trigger, e.g., v26.01.29)'
+    type: string
+    default: ''
+
+  # Option to run smoke tests
+  - name: run_smoke_tests
+    displayName: 'Run Smoke Tests after deployment'
+    type: boolean
+    default: true
+
+  # Auto-detect or manual selection
+  - name: auto_detect_services
+    displayName: 'Auto-detect services from changed files (uncheck to manually select below)'
+    type: boolean
+    default: true
+
+  # Manual service selection (only used if auto_detect_services = false)
+  # Command Handlers
+  - name: deploy_command_handler_admin
+    displayName: 'Deploy: command-handler.admin'
+    type: boolean
+    default: false
+
+  - name: deploy_command_handler_case_filing
+    displayName: 'Deploy: command-handler.case-filing'
+    type: boolean
+    default: false
+
+  - name: deploy_command_handler_chargeback
+    displayName: 'Deploy: command-handler.chargeback'
+    type: boolean
+    default: false
+
+  - name: deploy_command_handler_dispute_case
+    displayName: 'Deploy: command-handler.dispute-case'
+    type: boolean
+    default: false
+
+  - name: deploy_command_handler_etl
+    displayName: 'Deploy: command-handler.etl'
+    type: boolean
+    default: false
+
+  - name: deploy_command_handler_export
+    displayName: 'Deploy: command-handler.export'
+    type: boolean
+    default: false
+
+  - name: deploy_command_handler_representment
+    displayName: 'Deploy: command-handler.representment'
+    type: boolean
+    default: false
+
+  # Event Handlers
+  - name: deploy_event_handler_detokenize
+    displayName: 'Deploy: event-handler.detokenize'
+    type: boolean
+    default: false
+
+  - name: deploy_event_handler_dispute_case
+    displayName: 'Deploy: event-handler.dispute-case'
+    type: boolean
+    default: false
+
+  - name: deploy_event_handler_disputed_transaction_file
+    displayName: 'Deploy: event-handler.disputed-transaction-file'
+    type: boolean
+    default: false
+
+  - name: deploy_event_handler_etl
+    displayName: 'Deploy: event-handler.etl'
+    type: boolean
+    default: false
+
+  - name: deploy_event_handler_export
+    displayName: 'Deploy: event-handler.export'
+    type: boolean
+    default: false
+
+  # Discovery
+  - name: deploy_discovery_mastercard
+    displayName: 'Deploy: discovery.mastercard'
+    type: boolean
+    default: false
+
+  - name: deploy_discovery_visa
+    displayName: 'Deploy: discovery.visa'
+    type: boolean
+    default: false
+
+  # Other Services
+  - name: deploy_downloader_disputed_transaction_file
+    displayName: 'Deploy: downloader.disputed-transaction-file'
+    type: boolean
+    default: false
+
+  - name: deploy_enricher_dispute_case
+    displayName: 'Deploy: enricher.dispute-case'
+    type: boolean
+    default: false
+
+  - name: deploy_notifier_disputed_transaction_file
+    displayName: 'Deploy: notifier.disputed-transaction-file'
+    type: boolean
+    default: false
+
+  - name: deploy_parser_disputed_transaction_file
+    displayName: 'Deploy: parser.disputed-transaction-file'
+    type: boolean
+    default: false
+
+  - name: deploy_admin_dead_letter
+    displayName: 'Deploy: admin.dead-letter'
+    type: boolean
+    default: false
+
+  - name: deploy_case_management_web_api
+    displayName: 'Deploy: case-management.web.api'
+    type: boolean
+    default: false
+
+  - name: deploy_signaler_aws
+    displayName: 'Deploy: signaler.aws'
+    type: boolean
+    default: false
+
+variables:
+  - name: System.Debug
+    value: true
+  - name: POST_DEPLOYMENT_WAIT_MINUTES
+    value: 3
+  - name: AWS_REGION
+    value: 'us-east-1'
+  # Environment-specific variables
+  - name: TARGET_ENV
+    value: ${{ parameters.target_environment }}
+  - ${{ if eq(parameters.target_environment, 'Test') }}:
+    - name: ECR_URL
+      value: '111111111111.dkr.ecr.us-east-1.amazonaws.com'
+    - name: AGENT_POOL
+      value: 'Linux-Test'
+    - name: ADO_ENVIRONMENT
+      value: 'Service-Test-Env'
+    - name: TERRAFORM_BACKEND
+      value: 'test.s3.tfbackend'
+    - name: TERRAFORM_WORKSPACE
+      value: 'test'
+    - name: DOTNET_ENVIRONMENT
+      value: 'test'
+  - ${{ if eq(parameters.target_environment, 'Stage') }}:
+    - name: ECR_URL
+      value: '555555555555.dkr.ecr.us-east-1.amazonaws.com'
+    - name: AGENT_POOL
+      value: 'Linux-Demo'
+    - name: ADO_ENVIRONMENT
+      value: 'Service-Stage-Env'
+    - name: TERRAFORM_BACKEND
+      value: 'stage.s3.tfbackend'
+    - name: TERRAFORM_WORKSPACE
+      value: 'stage'
+    - name: DOTNET_ENVIRONMENT
+      value: 'stage'
+  - ${{ if eq(parameters.target_environment, 'Prod') }}:
+    - name: ECR_URL
+      value: '666666666666.dkr.ecr.us-east-1.amazonaws.com'
+    - name: AGENT_POOL
+      value: 'Linux-Prod'
+    - name: ADO_ENVIRONMENT
+      value: 'Service-Prod-Env'
+    - name: TERRAFORM_BACKEND
+      value: 'prod.s3.tfbackend'
+    - name: TERRAFORM_WORKSPACE
+      value: 'prod'
+    - name: DOTNET_ENVIRONMENT
+      value: 'prod'
+
+resources:
+  repositories:
+    - repository: mainRepository
+      type: github
+      name: example-org/platform-payment-service
+      endpoint: MerchantServices
+      ref: $(Build.SourceBranch)
+
+stages:
+  # ===========================================================================
+  # STAGE 1: DETECT CHANGES
+  # ===========================================================================
+  - stage: Stage_Detect
+    displayName: 'Detect Services to Deploy'
+    jobs:
+      - job: Job_Detect_Changes
+        displayName: 'Detect Changed Services'
+        pool:
+          name: 'Linux-Build'
+        variables:
+          # Determine the release tag (from trigger or parameter)
+          ${{ if ne(parameters.release_tag, '') }}:
+            RELEASE_TAG: ${{ parameters.release_tag }}
+          ${{ else }}:
+            RELEASE_TAG: $(Build.SourceBranchName)
+        steps:
+          - checkout: self
+            fetchDepth: 0  # Full history needed for git diff
+            displayName: 'Checkout with full history'
+
+          - bash: |
+              set -e
+              echo "========================================"
+              echo "DETECTING SERVICES TO DEPLOY"
+              echo "========================================"
+
+              # Get the release tag
+              if [ -n "${{ parameters.release_tag }}" ]; then
+                RELEASE_TAG="${{ parameters.release_tag }}"
+                echo "Using manual tag parameter: $RELEASE_TAG"
+              else
+                RELEASE_TAG="$(Build.SourceBranchName)"
+                echo "Using tag from trigger: $RELEASE_TAG"
+              fi
+              echo "##vso[task.setvariable variable=RELEASE_TAG;isOutput=true]$RELEASE_TAG"
+
+              # Check if manual service selection is enabled
+              AUTO_DETECT=$(echo "${{ parameters.auto_detect_services }}" | tr '[:upper:]' '[:lower:]')
+              if [ "$AUTO_DETECT" = "false" ]; then
+                echo "Using manual service selection (checkboxes)"
+                echo "----------------------------------------"
+                SERVICES_TO_DEPLOY=""
+
+                # Command Handlers
+                if [ "$(echo "${{ parameters.deploy_command_handler_admin }}" | tr '[:upper:]' '[:lower:]')" = "true" ]; then
+                  echo "  [x] command-handler.admin"
+                  echo "##vso[task.setvariable variable=deploy_command_handler_admin;isOutput=true]true"
+                  SERVICES_TO_DEPLOY="$SERVICES_TO_DEPLOY,command-handler.admin"
+                fi
+
+                if [ "$(echo "${{ parameters.deploy_command_handler_case_filing }}" | tr '[:upper:]' '[:lower:]')" = "true" ]; then
+                  echo "  [x] command-handler.case-filing"
+                  echo "##vso[task.setvariable variable=deploy_command_handler_case_filing;isOutput=true]true"
+                  SERVICES_TO_DEPLOY="$SERVICES_TO_DEPLOY,command-handler.case-filing"
+                fi
+
+                if [ "$(echo "${{ parameters.deploy_command_handler_chargeback }}" | tr '[:upper:]' '[:lower:]')" = "true" ]; then
+                  echo "  [x] command-handler.chargeback"
+                  echo "##vso[task.setvariable variable=deploy_command_handler_chargeback;isOutput=true]true"
+                  SERVICES_TO_DEPLOY="$SERVICES_TO_DEPLOY,command-handler.chargeback"
+                fi
+
+                if [ "$(echo "${{ parameters.deploy_command_handler_dispute_case }}" | tr '[:upper:]' '[:lower:]')" = "true" ]; then
+                  echo "  [x] command-handler.dispute-case"
+                  echo "##vso[task.setvariable variable=deploy_command_handler_dispute_case;isOutput=true]true"
+                  SERVICES_TO_DEPLOY="$SERVICES_TO_DEPLOY,command-handler.dispute-case"
+                fi
+
+                if [ "$(echo "${{ parameters.deploy_command_handler_etl }}" | tr '[:upper:]' '[:lower:]')" = "true" ]; then
+                  echo "  [x] command-handler.etl"
+                  echo "##vso[task.setvariable variable=deploy_command_handler_etl;isOutput=true]true"
+                  SERVICES_TO_DEPLOY="$SERVICES_TO_DEPLOY,command-handler.etl"
+                fi
+
+                if [ "$(echo "${{ parameters.deploy_command_handler_export }}" | tr '[:upper:]' '[:lower:]')" = "true" ]; then
+                  echo "  [x] command-handler.export"
+                  echo "##vso[task.setvariable variable=deploy_command_handler_export;isOutput=true]true"
+                  SERVICES_TO_DEPLOY="$SERVICES_TO_DEPLOY,command-handler.export"
+                fi
+
+                if [ "$(echo "${{ parameters.deploy_command_handler_representment }}" | tr '[:upper:]' '[:lower:]')" = "true" ]; then
+                  echo "  [x] command-handler.representment"
+                  echo "##vso[task.setvariable variable=deploy_command_handler_representment;isOutput=true]true"
+                  SERVICES_TO_DEPLOY="$SERVICES_TO_DEPLOY,command-handler.representment"
+                fi
+
+                # Event Handlers
+                if [ "$(echo "${{ parameters.deploy_event_handler_detokenize }}" | tr '[:upper:]' '[:lower:]')" = "true" ]; then
+                  echo "  [x] event-handler.detokenize"
+                  echo "##vso[task.setvariable variable=deploy_event_handler_detokenize;isOutput=true]true"
+                  SERVICES_TO_DEPLOY="$SERVICES_TO_DEPLOY,event-handler.detokenize"
+                fi
+
+                if [ "$(echo "${{ parameters.deploy_event_handler_dispute_case }}" | tr '[:upper:]' '[:lower:]')" = "true" ]; then
+                  echo "  [x] event-handler.dispute-case"
+                  echo "##vso[task.setvariable variable=deploy_event_handler_dispute_case;isOutput=true]true"
+                  SERVICES_TO_DEPLOY="$SERVICES_TO_DEPLOY,event-handler.dispute-case"
+                fi
+
+                if [ "$(echo "${{ parameters.deploy_event_handler_disputed_transaction_file }}" | tr '[:upper:]' '[:lower:]')" = "true" ]; then
+                  echo "  [x] event-handler.disputed-transaction-file"
+                  echo "##vso[task.setvariable variable=deploy_event_handler_disputed_transaction_file;isOutput=true]true"
+                  SERVICES_TO_DEPLOY="$SERVICES_TO_DEPLOY,event-handler.disputed-transaction-file"
+                fi
+
+                if [ "$(echo "${{ parameters.deploy_event_handler_etl }}" | tr '[:upper:]' '[:lower:]')" = "true" ]; then
+                  echo "  [x] event-handler.etl"
+                  echo "##vso[task.setvariable variable=deploy_event_handler_etl;isOutput=true]true"
+                  SERVICES_TO_DEPLOY="$SERVICES_TO_DEPLOY,event-handler.etl"
+                fi
+
+                if [ "$(echo "${{ parameters.deploy_event_handler_export }}" | tr '[:upper:]' '[:lower:]')" = "true" ]; then
+                  echo "  [x] event-handler.export"
+                  echo "##vso[task.setvariable variable=deploy_event_handler_export;isOutput=true]true"
+                  SERVICES_TO_DEPLOY="$SERVICES_TO_DEPLOY,event-handler.export"
+                fi
+
+                # Discovery
+                if [ "$(echo "${{ parameters.deploy_discovery_mastercard }}" | tr '[:upper:]' '[:lower:]')" = "true" ]; then
+                  echo "  [x] discovery.mastercard"
+                  echo "##vso[task.setvariable variable=deploy_discovery_mastercard;isOutput=true]true"
+                  SERVICES_TO_DEPLOY="$SERVICES_TO_DEPLOY,discovery.mastercard"
+                fi
+
+                if [ "$(echo "${{ parameters.deploy_discovery_visa }}" | tr '[:upper:]' '[:lower:]')" = "true" ]; then
+                  echo "  [x] discovery.visa"
+                  echo "##vso[task.setvariable variable=deploy_discovery_visa;isOutput=true]true"
+                  SERVICES_TO_DEPLOY="$SERVICES_TO_DEPLOY,discovery.visa"
+                fi
+
+                # Other Services
+                if [ "$(echo "${{ parameters.deploy_downloader_disputed_transaction_file }}" | tr '[:upper:]' '[:lower:]')" = "true" ]; then
+                  echo "  [x] downloader.disputed-transaction-file"
+                  echo "##vso[task.setvariable variable=deploy_downloader_disputed_transaction_file;isOutput=true]true"
+                  SERVICES_TO_DEPLOY="$SERVICES_TO_DEPLOY,downloader.disputed-transaction-file"
+                fi
+
+                if [ "$(echo "${{ parameters.deploy_enricher_dispute_case }}" | tr '[:upper:]' '[:lower:]')" = "true" ]; then
+                  echo "  [x] enricher.dispute-case"
+                  echo "##vso[task.setvariable variable=deploy_enricher_dispute_case;isOutput=true]true"
+                  SERVICES_TO_DEPLOY="$SERVICES_TO_DEPLOY,enricher.dispute-case"
+                fi
+
+                if [ "$(echo "${{ parameters.deploy_notifier_disputed_transaction_file }}" | tr '[:upper:]' '[:lower:]')" = "true" ]; then
+                  echo "  [x] notifier.disputed-transaction-file"
+                  echo "##vso[task.setvariable variable=deploy_notifier_disputed_transaction_file;isOutput=true]true"
+                  SERVICES_TO_DEPLOY="$SERVICES_TO_DEPLOY,notifier.disputed-transaction-file"
+                fi
+
+                if [ "$(echo "${{ parameters.deploy_parser_disputed_transaction_file }}" | tr '[:upper:]' '[:lower:]')" = "true" ]; then
+                  echo "  [x] parser.disputed-transaction-file"
+                  echo "##vso[task.setvariable variable=deploy_parser_disputed_transaction_file;isOutput=true]true"
+                  SERVICES_TO_DEPLOY="$SERVICES_TO_DEPLOY,parser.disputed-transaction-file"
+                fi
+
+                if [ "$(echo "${{ parameters.deploy_admin_dead_letter }}" | tr '[:upper:]' '[:lower:]')" = "true" ]; then
+                  echo "  [x] admin.dead-letter"
+                  echo "##vso[task.setvariable variable=deploy_admin_dead_letter;isOutput=true]true"
+                  SERVICES_TO_DEPLOY="$SERVICES_TO_DEPLOY,admin.dead-letter"
+                fi
+
+                if [ "$(echo "${{ parameters.deploy_case_management_web_api }}" | tr '[:upper:]' '[:lower:]')" = "true" ]; then
+                  echo "  [x] case-management.web.api"
+                  echo "##vso[task.setvariable variable=deploy_case_management_web_api;isOutput=true]true"
+                  SERVICES_TO_DEPLOY="$SERVICES_TO_DEPLOY,case-management.web.api"
+                fi
+
+                # Remove leading comma and save
+                SERVICES_TO_DEPLOY=$(echo "$SERVICES_TO_DEPLOY" | sed 's/^,//')
+                echo "##vso[task.setvariable variable=SERVICES_LIST;isOutput=true]$SERVICES_TO_DEPLOY"
+
+                echo ""
+                echo "========================================"
+                echo "Manually selected services: $SERVICES_TO_DEPLOY"
+                echo "========================================"
+
+                if [ -z "$SERVICES_TO_DEPLOY" ]; then
+                  echo "##vso[task.logissue type=warning]No services selected for deployment."
+                fi
+
+                exit 0
+              fi
+
+              # Auto-detect services from changed files
+              echo "Auto-detecting services from changed files..."
+
+              # Find the previous tag for comparison
+              echo ""
+              echo "Finding previous tag..."
+              PREVIOUS_TAG=$(git tag --sort=-version:refname | grep -E "^v[0-9]" | grep -v "^${RELEASE_TAG}$" | head -1)
+
+              if [ -z "$PREVIOUS_TAG" ]; then
+                echo "No previous tag found. Will deploy all services."
+                PREVIOUS_TAG="HEAD~100"  # Fallback: compare with last 100 commits
+              else
+                echo "Previous tag: $PREVIOUS_TAG"
+              fi
+
+              echo ""
+              echo "Comparing $PREVIOUS_TAG..$RELEASE_TAG"
+              echo "----------------------------------------"
+
+              # Get changed files
+              CHANGED_FILES=$(git diff --name-only "$PREVIOUS_TAG".."$RELEASE_TAG" 2>/dev/null || git diff --name-only HEAD~50)
+              echo "Changed files:"
+              echo "$CHANGED_FILES" | head -50
+
+              echo ""
+              echo "----------------------------------------"
+              echo "Services to deploy:"
+              echo "----------------------------------------"
+
+              # Map of folder prefixes to service names
+              SERVICES_TO_DEPLOY=""
+
+              # Command Handlers
+              if echo "$CHANGED_FILES" | grep -q "payment-service.command-handler.admin/"; then
+                echo "  [x] command-handler.admin"
+                echo "##vso[task.setvariable variable=deploy_command_handler_admin;isOutput=true]true"
+                SERVICES_TO_DEPLOY="$SERVICES_TO_DEPLOY,command-handler.admin"
+              fi
+
+              if echo "$CHANGED_FILES" | grep -q "payment-service.command-handler.case-filing/"; then
+                echo "  [x] command-handler.case-filing"
+                echo "##vso[task.setvariable variable=deploy_command_handler_case_filing;isOutput=true]true"
+                SERVICES_TO_DEPLOY="$SERVICES_TO_DEPLOY,command-handler.case-filing"
+              fi
+
+              if echo "$CHANGED_FILES" | grep -q "payment-service.command-handler.chargeback/"; then
+                echo "  [x] command-handler.chargeback"
+                echo "##vso[task.setvariable variable=deploy_command_handler_chargeback;isOutput=true]true"
+                SERVICES_TO_DEPLOY="$SERVICES_TO_DEPLOY,command-handler.chargeback"
+              fi
+
+              if echo "$CHANGED_FILES" | grep -q "payment-service.command-handler.dispute-case/"; then
+                echo "  [x] command-handler.dispute-case"
+                echo "##vso[task.setvariable variable=deploy_command_handler_dispute_case;isOutput=true]true"
+                SERVICES_TO_DEPLOY="$SERVICES_TO_DEPLOY,command-handler.dispute-case"
+              fi
+
+              if echo "$CHANGED_FILES" | grep -q "payment-service.command-handler.etl/"; then
+                echo "  [x] command-handler.etl"
+                echo "##vso[task.setvariable variable=deploy_command_handler_etl;isOutput=true]true"
+                SERVICES_TO_DEPLOY="$SERVICES_TO_DEPLOY,command-handler.etl"
+              fi
+
+              if echo "$CHANGED_FILES" | grep -q "payment-service.command-handler.export/"; then
+                echo "  [x] command-handler.export"
+                echo "##vso[task.setvariable variable=deploy_command_handler_export;isOutput=true]true"
+                SERVICES_TO_DEPLOY="$SERVICES_TO_DEPLOY,command-handler.export"
+              fi
+
+              if echo "$CHANGED_FILES" | grep -q "payment-service.command-handler.representment/"; then
+                echo "  [x] command-handler.representment"
+                echo "##vso[task.setvariable variable=deploy_command_handler_representment;isOutput=true]true"
+                SERVICES_TO_DEPLOY="$SERVICES_TO_DEPLOY,command-handler.representment"
+              fi
+
+              # Event Handlers
+              if echo "$CHANGED_FILES" | grep -q "payment-service.event-handler.detokenize/"; then
+                echo "  [x] event-handler.detokenize"
+                echo "##vso[task.setvariable variable=deploy_event_handler_detokenize;isOutput=true]true"
+                SERVICES_TO_DEPLOY="$SERVICES_TO_DEPLOY,event-handler.detokenize"
+              fi
+
+              if echo "$CHANGED_FILES" | grep -q "payment-service.event-handler.dispute-case/"; then
+                echo "  [x] event-handler.dispute-case"
+                echo "##vso[task.setvariable variable=deploy_event_handler_dispute_case;isOutput=true]true"
+                SERVICES_TO_DEPLOY="$SERVICES_TO_DEPLOY,event-handler.dispute-case"
+              fi
+
+              if echo "$CHANGED_FILES" | grep -q "payment-service.event-handler.disputed-transaction-file/"; then
+                echo "  [x] event-handler.disputed-transaction-file"
+                echo "##vso[task.setvariable variable=deploy_event_handler_disputed_transaction_file;isOutput=true]true"
+                SERVICES_TO_DEPLOY="$SERVICES_TO_DEPLOY,event-handler.disputed-transaction-file"
+              fi
+
+              if echo "$CHANGED_FILES" | grep -q "payment-service.event-handler.etl/"; then
+                echo "  [x] event-handler.etl"
+                echo "##vso[task.setvariable variable=deploy_event_handler_etl;isOutput=true]true"
+                SERVICES_TO_DEPLOY="$SERVICES_TO_DEPLOY,event-handler.etl"
+              fi
+
+              if echo "$CHANGED_FILES" | grep -q "payment-service.event-handler.export/"; then
+                echo "  [x] event-handler.export"
+                echo "##vso[task.setvariable variable=deploy_event_handler_export;isOutput=true]true"
+                SERVICES_TO_DEPLOY="$SERVICES_TO_DEPLOY,event-handler.export"
+              fi
+
+              # Discovery
+              if echo "$CHANGED_FILES" | grep -q "payment-service.discovery.mastercard/"; then
+                echo "  [x] discovery.mastercard"
+                echo "##vso[task.setvariable variable=deploy_discovery_mastercard;isOutput=true]true"
+                SERVICES_TO_DEPLOY="$SERVICES_TO_DEPLOY,discovery.mastercard"
+              fi
+
+              if echo "$CHANGED_FILES" | grep -q "payment-service.discovery.visa/"; then
+                echo "  [x] discovery.visa"
+                echo "##vso[task.setvariable variable=deploy_discovery_visa;isOutput=true]true"
+                SERVICES_TO_DEPLOY="$SERVICES_TO_DEPLOY,discovery.visa"
+              fi
+
+              # Other services
+              if echo "$CHANGED_FILES" | grep -q "payment-service.downloader.disputed-transaction-file/"; then
+                echo "  [x] downloader.disputed-transaction-file"
+                echo "##vso[task.setvariable variable=deploy_downloader_disputed_transaction_file;isOutput=true]true"
+                SERVICES_TO_DEPLOY="$SERVICES_TO_DEPLOY,downloader.disputed-transaction-file"
+              fi
+
+              if echo "$CHANGED_FILES" | grep -q "payment-service.enricher.dispute-case/"; then
+                echo "  [x] enricher.dispute-case"
+                echo "##vso[task.setvariable variable=deploy_enricher_dispute_case;isOutput=true]true"
+                SERVICES_TO_DEPLOY="$SERVICES_TO_DEPLOY,enricher.dispute-case"
+              fi
+
+              if echo "$CHANGED_FILES" | grep -q "payment-service.notifier.disputed-transaction-file/"; then
+                echo "  [x] notifier.disputed-transaction-file"
+                echo "##vso[task.setvariable variable=deploy_notifier_disputed_transaction_file;isOutput=true]true"
+                SERVICES_TO_DEPLOY="$SERVICES_TO_DEPLOY,notifier.disputed-transaction-file"
+              fi
+
+              if echo "$CHANGED_FILES" | grep -q "payment-service.parser.disputed-transaction-file/"; then
+                echo "  [x] parser.disputed-transaction-file"
+                echo "##vso[task.setvariable variable=deploy_parser_disputed_transaction_file;isOutput=true]true"
+                SERVICES_TO_DEPLOY="$SERVICES_TO_DEPLOY,parser.disputed-transaction-file"
+              fi
+
+              if echo "$CHANGED_FILES" | grep -q "payment-service.admin.dead-letter/"; then
+                echo "  [x] admin.dead-letter"
+                echo "##vso[task.setvariable variable=deploy_admin_dead_letter;isOutput=true]true"
+                SERVICES_TO_DEPLOY="$SERVICES_TO_DEPLOY,admin.dead-letter"
+              fi
+
+              if echo "$CHANGED_FILES" | grep -q "payment-service.case-management.web.api/"; then
+                echo "  [x] case-management.web.api"
+                echo "##vso[task.setvariable variable=deploy_case_management_web_api;isOutput=true]true"
+                SERVICES_TO_DEPLOY="$SERVICES_TO_DEPLOY,case-management.web.api"
+              fi
+
+              if echo "$CHANGED_FILES" | grep -q "payment-service.signaler.aws/"; then
+                echo "  [x] signaler.aws"
+                echo "##vso[task.setvariable variable=deploy_signaler_aws;isOutput=true]true"
+                SERVICES_TO_DEPLOY="$SERVICES_TO_DEPLOY,signaler.aws"
+              fi
+
+              # Also check for library changes that affect all services
+              LIBRARY_CHANGED="false"
+              if echo "$CHANGED_FILES" | grep -q "payment-service.library.core/"; then
+                echo "  [!] library.core changed - may affect multiple services"
+                LIBRARY_CHANGED="true"
+              fi
+              if echo "$CHANGED_FILES" | grep -q "payment-service.library.datadog/"; then
+                echo "  [!] library.datadog changed - may affect multiple services"
+                LIBRARY_CHANGED="true"
+              fi
+              if echo "$CHANGED_FILES" | grep -q "payment-service.library.aws/"; then
+                echo "  [!] library.aws changed - may affect multiple services"
+                LIBRARY_CHANGED="true"
+              fi
+              if echo "$CHANGED_FILES" | grep -q "payment-service.library.mongo/"; then
+                echo "  [!] library.mongo changed - may affect multiple services"
+                LIBRARY_CHANGED="true"
+              fi
+
+              echo "##vso[task.setvariable variable=LIBRARY_CHANGED;isOutput=true]$LIBRARY_CHANGED"
+
+              # Remove leading comma and save
+              SERVICES_TO_DEPLOY=$(echo "$SERVICES_TO_DEPLOY" | sed 's/^,//')
+              echo "##vso[task.setvariable variable=SERVICES_LIST;isOutput=true]$SERVICES_TO_DEPLOY"
+
+              echo ""
+              echo "========================================"
+              echo "Services to deploy: $SERVICES_TO_DEPLOY"
+              echo "Library changed: $LIBRARY_CHANGED"
+              echo "========================================"
+
+              if [ -z "$SERVICES_TO_DEPLOY" ]; then
+                echo "##vso[task.logissue type=warning]No services detected for deployment. If library changed, individual pipelines should handle the rebuild."
+              fi
+            name: DetectChanges
+            displayName: 'Detect Changed Services'
+
+          - bash: |
+              set -e
+
+              # Only verify pipelines when using auto-detect mode
+              if [ "${{ parameters.auto_detect_services }}" != "true" ]; then
+                echo "========================================"
+                echo "MANUAL MODE - SKIPPING PIPELINE VERIFICATION"
+                echo "========================================"
+                echo "Using manual service selection from parameters"
+                exit 0
+              fi
+
+              RELEASE_TAG="$(DetectChanges.RELEASE_TAG)"
+              SERVICES_LIST="$(DetectChanges.SERVICES_LIST)"
+
+              if [ -z "$SERVICES_LIST" ]; then
+                echo "========================================"
+                echo "NO SERVICES TO VERIFY"
+                echo "========================================"
+                exit 0
+              fi
+
+              echo "========================================"
+              echo "VERIFYING PIPELINE RUNS FOR TAG"
+              echo "========================================"
+              echo "Tag: $RELEASE_TAG"
+              echo "Services detected: $SERVICES_LIST"
+              echo "========================================"
+
+              # Azure DevOps API configuration
+              ORG_URL="https://dev.azure.com/example-org/"
+              PROJECT="MerchantServices"
+              PAT="$(System.AccessToken)"
+
+              # Map service names to pipeline names
+              declare -A PIPELINE_MAP
+              PIPELINE_MAP["command-handler.admin"]="payment-service.command-handler.admin"
+              PIPELINE_MAP["command-handler.case-filing"]="payment-service.command-handler.case-filing"
+              PIPELINE_MAP["command-handler.chargeback"]="payment-service.command-handler.chargeback"
+              PIPELINE_MAP["command-handler.dispute-case"]="payment-service.command-handler.dispute-case"
+              PIPELINE_MAP["command-handler.etl"]="payment-service.command-handler.etl"
+              PIPELINE_MAP["command-handler.export"]="payment-service.command-handler.export"
+              PIPELINE_MAP["command-handler.representment"]="payment-service.command-handler.representment"
+              PIPELINE_MAP["event-handler.detokenize"]="payment-service.event-handler.detokenize"
+              PIPELINE_MAP["event-handler.dispute-case"]="payment-service.event-handler.dispute-case"
+              PIPELINE_MAP["event-handler.disputed-transaction-file"]="payment-service.event-handler.disputed-transaction-file"
+              PIPELINE_MAP["event-handler.etl"]="payment-service.event-handler.etl"
+              PIPELINE_MAP["event-handler.export"]="payment-service.event-handler.export"
+              PIPELINE_MAP["discovery.mastercard"]="payment-service.discovery.mastercard"
+              PIPELINE_MAP["discovery.visa"]="payment-service.discovery.visa"
+              PIPELINE_MAP["downloader.disputed-transaction-file"]="payment-service.downloader.disputed-transaction-file"
+              PIPELINE_MAP["enricher.dispute-case"]="payment-service.enricher.dispute-case"
+              PIPELINE_MAP["notifier.disputed-transaction-file"]="payment-service.notifier.disputed-transaction-file"
+              PIPELINE_MAP["parser.disputed-transaction-file"]="payment-service.parser.disputed-transaction-file"
+              PIPELINE_MAP["admin.dead-letter"]="payment-service.admin.dead-letter"
+              PIPELINE_MAP["case-management.web.api"]="payment-service.case-management.web.api"
+
+              # Parse services list
+              IFS=',' read -ra SERVICES <<< "$SERVICES_LIST"
+
+              echo ""
+              echo "Checking which pipelines exist for tag $RELEASE_TAG..."
+              echo "----------------------------------------"
+
+              VERIFIED_SERVICES=""
+              for SERVICE in "${SERVICES[@]}"; do
+                PIPELINE_NAME="${PIPELINE_MAP[$SERVICE]}"
+                if [ -z "$PIPELINE_NAME" ]; then
+                  echo "  [?] Unknown service: $SERVICE"
+                  continue
+                fi
+
+                # Get pipeline definition ID
+                PIPELINE_ID=$(curl -s -u ":$PAT" \
+                  "${ORG_URL}${PROJECT}/_apis/pipelines?api-version=7.0" \
+                  | jq -r ".value[] | select(.name==\"$PIPELINE_NAME\") | .id")
+
+                if [ -z "$PIPELINE_ID" ] || [ "$PIPELINE_ID" == "null" ]; then
+                  echo "  [X] $SERVICE: Pipeline not found"
+                  continue
+                fi
+
+                # Get any run with the tag (regardless of status: queued, running, or completed)
+                RUN_INFO=$(curl -s -u ":$PAT" \
+                  "${ORG_URL}${PROJECT}/_apis/build/builds?definitions=$PIPELINE_ID&tagFilters=$RELEASE_TAG&api-version=7.0&\$top=1")
+
+                RUN_ID=$(echo "$RUN_INFO" | jq -r '.value[0].id')
+                RUN_STATUS=$(echo "$RUN_INFO" | jq -r '.value[0].status')
+
+                if [ -z "$RUN_ID" ] || [ "$RUN_ID" == "null" ]; then
+                  echo "  [X] $SERVICE: No pipeline run found with tag $RELEASE_TAG"
+                else
+                  echo "  [✓] $SERVICE: Pipeline run exists (ID: $RUN_ID, Status: $RUN_STATUS)"
+                  VERIFIED_SERVICES="$VERIFIED_SERVICES,$SERVICE"
+
+                  # Set deploy variable for this service
+                  SERVICE_VAR=$(echo "$SERVICE" | sed 's/\./_/g' | sed 's/-/_/g')
+                  echo "##vso[task.setvariable variable=deploy_${SERVICE_VAR};isOutput=true]true"
+                fi
+              done
+
+              # Remove leading comma
+              VERIFIED_SERVICES=$(echo "$VERIFIED_SERVICES" | sed 's/^,//')
+
+              echo ""
+              echo "========================================"
+              echo "VERIFICATION COMPLETE"
+              echo "========================================"
+              echo "Services with pipeline runs: $VERIFIED_SERVICES"
+              echo "========================================"
+
+              # Update SERVICES_LIST with only verified services
+              echo "##vso[task.setvariable variable=SERVICES_LIST;isOutput=true]$VERIFIED_SERVICES"
+
+              if [ -z "$VERIFIED_SERVICES" ]; then
+                echo "##vso[task.logissue type=warning]No pipeline runs found for tag $RELEASE_TAG. Individual pipelines may not have been triggered yet."
+              fi
+            name: VerifyPipelines
+            displayName: 'Verify Pipeline Runs Exist'
+            env:
+              SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+
+  # ===========================================================================
+  # STAGE 2: APPROVAL
+  # ===========================================================================
+  - stage: Stage_Approval
+    displayName: 'Production Approval'
+    dependsOn: Stage_Detect
+    variables:
+      RELEASE_TAG: $[stageDependencies.Stage_Detect.Job_Detect_Changes.outputs['DetectChanges.RELEASE_TAG']]
+      SERVICES_LIST: $[stageDependencies.Stage_Detect.Job_Detect_Changes.outputs['DetectChanges.SERVICES_LIST']]
+    jobs:
+      # =========================================================================
+      # Manual Validation for Test/Stage (Agentless - no agent blocking)
+      # =========================================================================
+      - job: Manual_Validation_Test_Stage
+        displayName: 'Manual Approval (Test/Stage Only)'
+        pool: server  # Agentless - does not consume an agent
+        condition: ne(variables['TARGET_ENV'], 'Prod')
+        steps:
+          - task: ManualValidation@0
+            displayName: 'Wait for manual verification and approval'
+            timeoutInMinutes: 1440  # 24 hours timeout
+            inputs:
+              notifyUsers: 'user@example-company.com'
+              instructions: |
+                ========================================
+                APPROVAL REQUIRED FOR ${{ parameters.target_environment }}
+                ========================================
+
+                Tag: $(RELEASE_TAG)
+                Services: $(SERVICES_LIST)
+
+                BEFORE APPROVING:
+                1. Verify that individual pipelines completed successfully
+                2. Confirm that artifacts are available in Azure DevOps
+                3. Check individual pipeline logs for errors
+
+                Approve only when certain that artifacts are ready.
+                ========================================
+              onTimeout: 'reject'
+
+      # =========================================================================
+      # Environment Approval (used for all environments)
+      # =========================================================================
+      - deployment: Job_Approval
+        displayName: 'Approve ${{ parameters.target_environment }} Deployment'
+        dependsOn: Manual_Validation_Test_Stage
+        condition: in(dependencies.Manual_Validation_Test_Stage.result, 'Succeeded', 'Skipped')
+        ${{ if eq(parameters.target_environment, 'Test') }}:
+          # GitHub Environment — enables deployment protection rules and secrets scoping
+          environment: 'Service-Test-Env'
+        ${{ if eq(parameters.target_environment, 'Stage') }}:
+          environment: 'Service-Stage-Env'
+        ${{ if eq(parameters.target_environment, 'Prod') }}:
+          environment: 'Service-Prod-Env'
+        pool:
+          name: 'Linux-Build'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: none
+                - bash: |
+                    echo "========================================"
+                    echo "${{ upper(parameters.target_environment) }} DEPLOYMENT APPROVED"
+                    echo "========================================"
+                    echo "Release Tag: $(RELEASE_TAG)"
+                    echo "Services: $(SERVICES_LIST)"
+                    echo "========================================"
+                  displayName: 'Approval Summary'
+
+  # ===========================================================================
+  # STAGE 3: DEPLOY TO TARGET ENVIRONMENT
+  # ===========================================================================
+  - stage: Stage_Deploy
+    displayName: 'Deploy to ${{ parameters.target_environment }}'
+    dependsOn:
+      - Stage_Detect
+      - Stage_Approval
+    variables:
+      RELEASE_TAG: $[stageDependencies.Stage_Detect.Job_Detect_Changes.outputs['DetectChanges.RELEASE_TAG']]
+      deploy_command_handler_admin: $[stageDependencies.Stage_Detect.Job_Detect_Changes.outputs['DetectChanges.deploy_command_handler_admin']]
+      deploy_command_handler_case_filing: $[stageDependencies.Stage_Detect.Job_Detect_Changes.outputs['DetectChanges.deploy_command_handler_case_filing']]
+      deploy_command_handler_chargeback: $[stageDependencies.Stage_Detect.Job_Detect_Changes.outputs['DetectChanges.deploy_command_handler_chargeback']]
+      deploy_command_handler_dispute_case: $[stageDependencies.Stage_Detect.Job_Detect_Changes.outputs['DetectChanges.deploy_command_handler_dispute_case']]
+      deploy_command_handler_etl: $[stageDependencies.Stage_Detect.Job_Detect_Changes.outputs['DetectChanges.deploy_command_handler_etl']]
+      deploy_command_handler_export: $[stageDependencies.Stage_Detect.Job_Detect_Changes.outputs['DetectChanges.deploy_command_handler_export']]
+      deploy_command_handler_representment: $[stageDependencies.Stage_Detect.Job_Detect_Changes.outputs['DetectChanges.deploy_command_handler_representment']]
+      deploy_event_handler_detokenize: $[stageDependencies.Stage_Detect.Job_Detect_Changes.outputs['DetectChanges.deploy_event_handler_detokenize']]
+      deploy_event_handler_dispute_case: $[stageDependencies.Stage_Detect.Job_Detect_Changes.outputs['DetectChanges.deploy_event_handler_dispute_case']]
+      deploy_event_handler_disputed_transaction_file: $[stageDependencies.Stage_Detect.Job_Detect_Changes.outputs['DetectChanges.deploy_event_handler_disputed_transaction_file']]
+      deploy_event_handler_etl: $[stageDependencies.Stage_Detect.Job_Detect_Changes.outputs['DetectChanges.deploy_event_handler_etl']]
+      deploy_event_handler_export: $[stageDependencies.Stage_Detect.Job_Detect_Changes.outputs['DetectChanges.deploy_event_handler_export']]
+      deploy_discovery_mastercard: $[stageDependencies.Stage_Detect.Job_Detect_Changes.outputs['DetectChanges.deploy_discovery_mastercard']]
+      deploy_discovery_visa: $[stageDependencies.Stage_Detect.Job_Detect_Changes.outputs['DetectChanges.deploy_discovery_visa']]
+      deploy_downloader_disputed_transaction_file: $[stageDependencies.Stage_Detect.Job_Detect_Changes.outputs['DetectChanges.deploy_downloader_disputed_transaction_file']]
+      deploy_enricher_dispute_case: $[stageDependencies.Stage_Detect.Job_Detect_Changes.outputs['DetectChanges.deploy_enricher_dispute_case']]
+      deploy_notifier_disputed_transaction_file: $[stageDependencies.Stage_Detect.Job_Detect_Changes.outputs['DetectChanges.deploy_notifier_disputed_transaction_file']]
+      deploy_parser_disputed_transaction_file: $[stageDependencies.Stage_Detect.Job_Detect_Changes.outputs['DetectChanges.deploy_parser_disputed_transaction_file']]
+      deploy_admin_dead_letter: $[stageDependencies.Stage_Detect.Job_Detect_Changes.outputs['DetectChanges.deploy_admin_dead_letter']]
+      deploy_case_management_web_api: $[stageDependencies.Stage_Detect.Job_Detect_Changes.outputs['DetectChanges.deploy_case_management_web_api']]
+      deploy_signaler_aws: $[stageDependencies.Stage_Detect.Job_Detect_Changes.outputs['DetectChanges.deploy_signaler_aws']]
+
+    jobs:
+      # =========================================================================
+      # COMMAND HANDLERS
+      # =========================================================================
+      - template: ../payment-service.pipeline.templates/orchestrator-deploy-service.yml
+        parameters:
+          SERVICE_NAME: 'command-handler.admin'
+          CONDITION_VAR: 'deploy_command_handler_admin'
+          PIPELINE_NAME: 'payment-service.command-handler.admin'
+          DOCKER_IMAGE_NAME: 'platform-services-ecr/payment-service.command-handler.admin'
+          APPLICATION_FOLDER_NAME: 'payment-service.command-handler.admin'
+          RUN_SMOKE_TESTS: ${{ parameters.run_smoke_tests }}
+
+      - template: ../payment-service.pipeline.templates/orchestrator-deploy-service.yml
+        parameters:
+          SERVICE_NAME: 'command-handler.case-filing'
+          CONDITION_VAR: 'deploy_command_handler_case_filing'
+          PIPELINE_NAME: 'payment-service.command-handler.case-filing'
+          DOCKER_IMAGE_NAME: 'platform-services-ecr/payment-service.command-handler.case-filing'
+          APPLICATION_FOLDER_NAME: 'payment-service.command-handler.case-filing'
+          RUN_SMOKE_TESTS: ${{ parameters.run_smoke_tests }}
+
+      - template: ../payment-service.pipeline.templates/orchestrator-deploy-service.yml
+        parameters:
+          SERVICE_NAME: 'command-handler.chargeback'
+          CONDITION_VAR: 'deploy_command_handler_chargeback'
+          PIPELINE_NAME: 'payment-service.command-handler.chargeback'
+          DOCKER_IMAGE_NAME: 'platform-services-ecr/payment-service.command-handler.chargeback'
+          APPLICATION_FOLDER_NAME: 'payment-service.command-handler.chargeback'
+          RUN_SMOKE_TESTS: ${{ parameters.run_smoke_tests }}
+
+      - template: ../payment-service.pipeline.templates/orchestrator-deploy-service.yml
+        parameters:
+          SERVICE_NAME: 'command-handler.dispute-case'
+          CONDITION_VAR: 'deploy_command_handler_dispute_case'
+          PIPELINE_NAME: 'payment-service.command-handler.dispute-case'
+          DOCKER_IMAGE_NAME: 'platform-services-ecr/payment-service.command-handler.dispute-case'
+          APPLICATION_FOLDER_NAME: 'payment-service.command-handler.dispute-case'
+          RUN_SMOKE_TESTS: ${{ parameters.run_smoke_tests }}
+
+      - template: ../payment-service.pipeline.templates/orchestrator-deploy-service.yml
+        parameters:
+          SERVICE_NAME: 'command-handler.etl'
+          CONDITION_VAR: 'deploy_command_handler_etl'
+          PIPELINE_NAME: 'payment-service.command-handler.etl'
+          DOCKER_IMAGE_NAME: 'platform-services-ecr/payment-service.command-handler.etl'
+          APPLICATION_FOLDER_NAME: 'payment-service.command-handler.etl'
+          RUN_SMOKE_TESTS: ${{ parameters.run_smoke_tests }}
+
+      - template: ../payment-service.pipeline.templates/orchestrator-deploy-service.yml
+        parameters:
+          SERVICE_NAME: 'command-handler.export'
+          CONDITION_VAR: 'deploy_command_handler_export'
+          PIPELINE_NAME: 'payment-service.command-handler.export'
+          DOCKER_IMAGE_NAME: 'platform-services-ecr/payment-service.command-handler.export'
+          APPLICATION_FOLDER_NAME: 'payment-service.command-handler.export'
+          RUN_SMOKE_TESTS: ${{ parameters.run_smoke_tests }}
+
+      - template: ../payment-service.pipeline.templates/orchestrator-deploy-service.yml
+        parameters:
+          SERVICE_NAME: 'command-handler.representment'
+          CONDITION_VAR: 'deploy_command_handler_representment'
+          PIPELINE_NAME: 'payment-service.command-handler.representment'
+          DOCKER_IMAGE_NAME: 'platform-services-ecr/payment-service.command-handler.representment'
+          APPLICATION_FOLDER_NAME: 'payment-service.command-handler.representment'
+          RUN_SMOKE_TESTS: ${{ parameters.run_smoke_tests }}
+
+      # =========================================================================
+      # EVENT HANDLERS
+      # =========================================================================
+      - template: ../payment-service.pipeline.templates/orchestrator-deploy-service.yml
+        parameters:
+          SERVICE_NAME: 'event-handler.detokenize'
+          CONDITION_VAR: 'deploy_event_handler_detokenize'
+          PIPELINE_NAME: 'payment-service.event-handler.detokenize'
+          DOCKER_IMAGE_NAME: 'platform-services-ecr/payment-service.event-handler.detokenize'
+          APPLICATION_FOLDER_NAME: 'payment-service.event-handler.detokenize'
+          RUN_SMOKE_TESTS: ${{ parameters.run_smoke_tests }}
+
+      - template: ../payment-service.pipeline.templates/orchestrator-deploy-service.yml
+        parameters:
+          SERVICE_NAME: 'event-handler.dispute-case'
+          CONDITION_VAR: 'deploy_event_handler_dispute_case'
+          PIPELINE_NAME: 'payment-service.event-handler.dispute-case'
+          DOCKER_IMAGE_NAME: 'platform-services-ecr/payment-service.event-handler.dispute-case'
+          APPLICATION_FOLDER_NAME: 'payment-service.event-handler.dispute-case'
+          RUN_SMOKE_TESTS: ${{ parameters.run_smoke_tests }}
+
+      - template: ../payment-service.pipeline.templates/orchestrator-deploy-service.yml
+        parameters:
+          SERVICE_NAME: 'event-handler.disputed-transaction-file'
+          CONDITION_VAR: 'deploy_event_handler_disputed_transaction_file'
+          PIPELINE_NAME: 'payment-service.event-handler.disputed-transaction-file'
+          DOCKER_IMAGE_NAME: 'platform-services-ecr/payment-service.event-handler.disputed-transaction-file'
+          APPLICATION_FOLDER_NAME: 'payment-service.event-handler.disputed-transaction-file'
+          RUN_SMOKE_TESTS: ${{ parameters.run_smoke_tests }}
+
+      - template: ../payment-service.pipeline.templates/orchestrator-deploy-service.yml
+        parameters:
+          SERVICE_NAME: 'event-handler.etl'
+          CONDITION_VAR: 'deploy_event_handler_etl'
+          PIPELINE_NAME: 'payment-service.event-handler.etl'
+          DOCKER_IMAGE_NAME: 'platform-services-ecr/payment-service.event-handler.etl'
+          APPLICATION_FOLDER_NAME: 'payment-service.event-handler.etl'
+          RUN_SMOKE_TESTS: ${{ parameters.run_smoke_tests }}
+
+      - template: ../payment-service.pipeline.templates/orchestrator-deploy-service.yml
+        parameters:
+          SERVICE_NAME: 'event-handler.export'
+          CONDITION_VAR: 'deploy_event_handler_export'
+          PIPELINE_NAME: 'payment-service.event-handler.export'
+          DOCKER_IMAGE_NAME: 'platform-services-ecr/payment-service.event-handler.export'
+          APPLICATION_FOLDER_NAME: 'payment-service.event-handler.export'
+          RUN_SMOKE_TESTS: ${{ parameters.run_smoke_tests }}
+
+      # =========================================================================
+      # DISCOVERY
+      # =========================================================================
+      - template: ../payment-service.pipeline.templates/orchestrator-deploy-service.yml
+        parameters:
+          SERVICE_NAME: 'discovery.mastercard'
+          CONDITION_VAR: 'deploy_discovery_mastercard'
+          PIPELINE_NAME: 'payment-service.discovery.mastercard'
+          DOCKER_IMAGE_NAME: 'platform-services-ecr/payment-service.discovery.mastercard'
+          APPLICATION_FOLDER_NAME: 'payment-service.discovery.mastercard'
+          RUN_SMOKE_TESTS: ${{ parameters.run_smoke_tests }}
+
+      - template: ../payment-service.pipeline.templates/orchestrator-deploy-service.yml
+        parameters:
+          SERVICE_NAME: 'discovery.visa'
+          CONDITION_VAR: 'deploy_discovery_visa'
+          PIPELINE_NAME: 'payment-service.discovery.visa'
+          DOCKER_IMAGE_NAME: 'platform-services-ecr/payment-service.discovery.visa'
+          APPLICATION_FOLDER_NAME: 'payment-service.discovery.visa'
+          RUN_SMOKE_TESTS: ${{ parameters.run_smoke_tests }}
+
+      # =========================================================================
+      # OTHER SERVICES
+      # =========================================================================
+      - template: ../payment-service.pipeline.templates/orchestrator-deploy-service.yml
+        parameters:
+          SERVICE_NAME: 'downloader.disputed-transaction-file'
+          CONDITION_VAR: 'deploy_downloader_disputed_transaction_file'
+          PIPELINE_NAME: 'payment-service.downloader.disputed-transaction-file'
+          DOCKER_IMAGE_NAME: 'platform-services-ecr/payment-service.downloader.disputed-transaction-file'
+          APPLICATION_FOLDER_NAME: 'payment-service.downloader.disputed-transaction-file'
+          RUN_SMOKE_TESTS: ${{ parameters.run_smoke_tests }}
+
+      - template: ../payment-service.pipeline.templates/orchestrator-deploy-service.yml
+        parameters:
+          SERVICE_NAME: 'enricher.dispute-case'
+          CONDITION_VAR: 'deploy_enricher_dispute_case'
+          PIPELINE_NAME: 'payment-service.enricher.dispute-case'
+          DOCKER_IMAGE_NAME: 'platform-services-ecr/payment-service.enricher.dispute-case'
+          APPLICATION_FOLDER_NAME: 'payment-service.enricher.dispute-case'
+          RUN_SMOKE_TESTS: ${{ parameters.run_smoke_tests }}
+
+      - template: ../payment-service.pipeline.templates/orchestrator-deploy-service.yml
+        parameters:
+          SERVICE_NAME: 'notifier.disputed-transaction-file'
+          CONDITION_VAR: 'deploy_notifier_disputed_transaction_file'
+          PIPELINE_NAME: 'payment-service.notifier.disputed-transaction-file'
+          DOCKER_IMAGE_NAME: 'platform-services-ecr/payment-service.notifier.disputed-transaction-file'
+          APPLICATION_FOLDER_NAME: 'payment-service.notifier.disputed-transaction-file'
+          RUN_SMOKE_TESTS: ${{ parameters.run_smoke_tests }}
+
+      - template: ../payment-service.pipeline.templates/orchestrator-deploy-service.yml
+        parameters:
+          SERVICE_NAME: 'parser.disputed-transaction-file'
+          CONDITION_VAR: 'deploy_parser_disputed_transaction_file'
+          PIPELINE_NAME: 'payment-service.parser.disputed-transaction-file'
+          DOCKER_IMAGE_NAME: 'platform-services-ecr/payment-service.parser.disputed-transaction-file'
+          APPLICATION_FOLDER_NAME: 'payment-service.parser.disputed-transaction-file'
+          RUN_SMOKE_TESTS: ${{ parameters.run_smoke_tests }}
+
+      - template: ../payment-service.pipeline.templates/orchestrator-deploy-service.yml
+        parameters:
+          SERVICE_NAME: 'admin.dead-letter'
+          CONDITION_VAR: 'deploy_admin_dead_letter'
+          PIPELINE_NAME: 'payment-service.admin.dead-letter'
+          DOCKER_IMAGE_NAME: 'platform-services-ecr/payment-service.admin.dead-letter'
+          APPLICATION_FOLDER_NAME: 'payment-service.admin.dead-letter'
+          RUN_SMOKE_TESTS: ${{ parameters.run_smoke_tests }}
+
+      - template: ../payment-service.pipeline.templates/orchestrator-deploy-service.yml
+        parameters:
+          SERVICE_NAME: 'case-management.web.api'
+          CONDITION_VAR: 'deploy_case_management_web_api'
+          PIPELINE_NAME: 'payment-service.case-management.web.api'
+          DOCKER_IMAGE_NAME: 'platform-services-ecr/payment-service.case-management.web.api'
+          APPLICATION_FOLDER_NAME: 'payment-service.case-management.web.api'
+          RUN_SMOKE_TESTS: ${{ parameters.run_smoke_tests }}
+
+      - template: ../payment-service.pipeline.templates/orchestrator-deploy-service.yml
+        parameters:
+          SERVICE_NAME: 'signaler.aws'
+          CONDITION_VAR: 'deploy_signaler_aws'
+          PIPELINE_NAME: 'payment-service.signaler.aws'
+          DOCKER_IMAGE_NAME: 'platform-services-ecr/payment-service.signaler.aws'
+          APPLICATION_FOLDER_NAME: 'payment-service.signaler.aws'
+          RUN_SMOKE_TESTS: ${{ parameters.run_smoke_tests }}
+
+  # ===========================================================================
+  # STAGE: JELLYFISH REPORTING (Prod only)
+  # ===========================================================================
+  - stage: Stage_Jellyfish
+    displayName: 'Report to Jellyfish'
+    dependsOn: Stage_Deploy
+    condition: eq('${{ parameters.target_environment }}', 'Prod')
+    jobs:
+      - template: ../payment-service.pipeline.templates/jellyfish-report-deployment.yml
+        parameters:
+          DEPENDENT_JOB_NAME: ''
+          VARIABLES_JOB_NAME: 'Job_Jellyfish_Deployment_Variables'
+          VARIABLES_TASK_NAME: 'Task_Jellyfish_Deployment_Variables'
+          JELLYFISH_JOB_NAME: 'Job_Jellyfish_Api_Call'
+          SERVICE_CONNECTION_NAME: 'FINSERV Jellyfish - Deployment'
+          JELLYFISH_API_TOKEN: '$(SECRET_JELLYFISH_API_TOKEN)'
+          JELLYFISH_SOURCE_URL: 'https://github.com/example-org/platform-payment-service'
+

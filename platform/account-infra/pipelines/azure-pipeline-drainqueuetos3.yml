@@ -1,0 +1,84 @@
+# azure-pipeline-drainqueuetos3.yml
+# S3 bucket configuration
+# Maintained by: Platform Engineering
+
+# azure-pipeline-drainqueuetos3.yml — S3 bucket configuration
+
+name: $(BuildDefinitionName)_$(Date:yyyMMdd)$(rev:.rr)
+
+trigger: none
+
+stages:
+- stage: Stage_Build
+  displayName: 'Build AWS lambda'
+  jobs:
+  - job: Job_BuildLambda
+    displayName: Build AWS lambda artifacts
+    pool:
+      name: Azure Pipelines
+      vmImage: ubuntu-latest
+    variables:
+      AppBuilderContainerName: enc-lambda-drain-s3-queue
+      DotnetSdkDockerImage: mcr.microsoft.com/dotnet/sdk:6.0
+      LambdaArtifactName: LambdaArtifact
+      LambdaFilename: DrainQueueToS3.zip
+
+    steps:
+    # 'self' is the repository where the pipeline YAML file is stored
+    - checkout: self
+      path: application
+      clean: true
+      displayName: Checkout the source repository
+
+    - script: printenv
+      displayName: Display all environment variables
+
+      # See https://github.com/dotnet/dotnet-docker/blob/main/samples/build-in-sdk-container.md
+    - bash: |
+        sudo docker pull $(DotnetSdkDockerImage)
+      displayName: Pull the .Net SDK docker image
+
+    - bash: |
+        sudo docker run -d -i --name $(AppBuilderContainerName) --volume $(pwd)/lambdas/DrainQueueToS3:/app --env PATH=/root/.dotnet/tools:$PATH  $(DotnetSdkDockerImage) /bin/bash
+      displayName: Run the builder image
+
+    - bash: |
+        sudo docker exec --workdir /app $(AppBuilderContainerName) apt-get update
+      displayName: Update package repository in container
+
+    - bash: |
+        sudo docker exec --workdir /app $(AppBuilderContainerName) apt-get install -y zip
+      displayName: Install zip command in container
+
+    - bash: |
+        sudo docker exec --workdir /app $(AppBuilderContainerName) dotnet tool install -g Amazon.Lambda.Tools
+      displayName: Install dotnet tool Amazon.Lambda.Tools in container
+
+    - bash: |
+        sudo docker exec --workdir /app $(AppBuilderContainerName) dotnet lambda package
+      displayName: Build the application in container
+
+    - bash: |
+        sudo docker exec --workdir /app $(AppBuilderContainerName) ls -lRa --ignore=.git
+      condition: eq(variables['System.debug'], 'true')
+      displayName: List the files in container
+
+    - bash: |
+        sudo docker rm --force $(AppBuilderContainerName) || :
+      condition: always()
+      displayName: Remove the container (swallow errors)
+
+    - bash: |
+        echo pwd: `pwd`
+        ls -l --recursive --all --ignore=.git
+      condition: eq(variables['System.debug'], 'true')
+      displayName: List agent host files
+
+    - bash: |
+        sudo mv app.zip $(LambdaFilename)
+      workingDirectory: $(System.DefaultWorkingDirectory)/lambdas/DrainQueueToS3/bin/Release/netcoreapp3.1/
+      displayName: Rename lambda from the default app.zip
+
+    - publish: lambdas/DrainQueueToS3/bin/Release/netcoreapp3.1/$(LambdaFilename)
+      artifact: $(LambdaArtifactName)
+      displayName: Publish the pipeline artifact

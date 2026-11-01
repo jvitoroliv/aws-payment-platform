@@ -1,0 +1,44 @@
+# File: coreplatform-fi-infrastructure-FINSERV_PROD_TEMPLATE.yml
+# Purpose: A majority of the pipelines are identical, this template will be helpful in isolating 
+# and better encapsulating common functionality, as well as enforcing DRY (Don't repeat yourself)
+
+parameters:
+- name: EnvironmentName
+  default: 'QA'
+- name: AgentPoolName
+  type: string
+  values:
+  - CpAWS-Demo
+  - CpAWS-QA
+  - CpAWS-UAT
+  - CpAWS-UATDR
+  default: CpAWS-QA
+
+jobs:
+- job: Phase_1
+  displayName: Agent job 1
+  pool: ${{ parameters.AgentPoolName }}
+  steps:
+  - checkout: self
+    clean: true
+    persistCredentials: True
+ 
+   # Prefixing git urls with the SYSTEM_ACCESSTOKEN
+  - template: rewriteTerraformGitUrlsToIncludeToken.yml
+
+  - script: |
+      terraform init -input=false
+    workingDirectory: env\${{parameters.EnvironmentName}}
+    displayName: terraform init
+    
+  - script: |
+      $Env:TF_IN_AUTOMATION = 'true'
+      terraform state list
+    workingDirectory: env\${{parameters.EnvironmentName}}
+    #condition: eq(variables['System.debug'], 'true')
+    displayName: 'terraform state list'
+ 
+  - script: |
+      terraform  destroy -auto-approve
+    workingDirectory: env\${{parameters.environmentName}}
+    displayName: terraform destroy

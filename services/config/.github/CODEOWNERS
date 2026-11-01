@@ -1,0 +1,8 @@
+* @example-org/tag-leads
+
+# DevOps
+*Jenkinsfile @example-org/tag-devops-leads
+/.github/workflows @example-org/tag-devops-leads
+/.github/linters/actionlint.yaml @example-org/tag-devops-leads
+/.github/linters/groovylintrc.json @example-org/tag-devops-leads
+

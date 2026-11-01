@@ -1,0 +1,12 @@
+{
+  "threshold": 35,
+  "reporters": [
+    "consoleFull"
+  ],
+  "ignore": [
+    "**/__snapshots__/**",
+    "**/*_test.go",
+    "**/mockery/**"
+  ],
+  "absolute": true
+}

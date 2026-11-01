@@ -1,0 +1,20 @@
+# wait-template.yml
+# wait-template configuration
+
+parameters:
+- name: JOB_NAME
+  type: string
+- name: DEPENDENT_JOB_NAME
+  type: string
+- name: WAIT_IN_MINUTES
+  type: string
+
+jobs:
+- job: ${{ parameters.JOB_NAME }}
+  displayName: "Waiting"
+  dependsOn: ${{ parameters.DEPENDENT_JOB_NAME }}
+  pool: server
+  steps:
+  - task: Delay@1
+    inputs:
+      delayForMinutes: ${{ parameters.WAIT_IN_MINUTES }}

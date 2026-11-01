@@ -1,0 +1,15 @@
+// #!groovy
+
+// disableConcurrentBuilds()
+
+// node("dev") {
+//     stage('Prep') {
+//         SCM_CHECKOUT = checkout scm
+//     }
+
+//     stage('Go Tests') {
+//         docker.image("golang:1.19.2").inside("-u root") {
+//             sh "go test ."
+//         }
+//     }
+// }

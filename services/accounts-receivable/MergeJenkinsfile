@@ -1,0 +1,93 @@
+#!groovy
+
+properties(
+        [
+                ([
+                        $class       : 'DatadogJobProperty',
+                        tagProperties: "jenkins.job.duration,jenkins.job.status"
+                ])
+        ]
+)
+
+disableConcurrentBuilds()
+
+node("dev") {
+    def COMPOSE_COMMAND
+    stage('Prep') {
+        SCM_CHECKOUT = checkout scm
+
+        env.ARTIFACTORY_VIRTUAL_REPOSITORY_URL = "registry.example.io/tag-docker-prod-virtual-us/"
+        env.VERSION="RC-${SCM_CHECKOUT.GIT_COMMIT}"
+
+        buildName "${env.BUILD_NUMBER}) ${env.VERSION}"
+
+        COMPOSE_COMMAND = "docker-compose -f docker-compose.yml -f docker-compose.override.yml -p ${env.VERSION}"
+    }
+
+    try {
+        ansiColor('xterm') {
+            stage("Build Docker Images") {
+                withDockerRegistry(credentialsId: 'tag-devops-cloud-artifactory-creds', url: 'https://registry.example.io/') {
+                    // Building the images requires the GITHUB_USERNAME and GITHUB_AUTH_TOKEN env vars to retrieve private Golang deps
+                    withCredentials([usernamePassword(credentialsId: 'jenkins-default-GitHub-Token-example-org', passwordVariable: 'GITHUB_AUTH_TOKEN', usernameVariable: 'GITHUB_USERNAME')]) {
+                        // Pull all external images via Artifactory to bypass Docker Hub pull limit
+                        withEnv(["REPOSITORY_URL=${env.ARTIFACTORY_VIRTUAL_REPOSITORY_URL}"]) {
+                            // Build all required images
+                            sh "make docker-build DOCKER_COMPOSE='${COMPOSE_COMMAND}'"
+                        }
+                    }
+                }
+            }
+
+            stage('Unit Tests') {
+                sh "make docker-unit-test build=false DOCKER_COMPOSE='${COMPOSE_COMMAND}'"
+                if (fileExists ('./outputs/test_coverage.out')) {
+                    archiveArtifacts artifacts: 'outputs/test_coverage.*', fingerprint: true
+                    try {
+                        sh "curl https://deepsource.io/cli | sh"
+                        withCredentials([string(credentialsId: 'ps-tag-accounts-receivable-deepsource-dsn', variable: 'DEEPSOURCE_DSN')]) {
+                            sh "./bin/deepsource report --analyzer test-coverage --key go --value-file ./outputs/test_coverage.out"
+                        }
+                    } catch (Exception e) {
+                        println "Code coverage upload to DeepSource failed: ${e}"
+                    }
+                }
+            }
+
+            stage('Integration Tests') {
+                withDockerRegistry(credentialsId: 'tag-devops-cloud-artifactory-creds', url: 'https://registry.example.io/') {
+                    // Pull all external images via Artifactory to bypass Docker Hub pull limit
+                    withEnv(["REPOSITORY_URL=${env.ARTIFACTORY_VIRTUAL_REPOSITORY_URL}"]) {
+                        sh "make docker-integration-test build=false DOCKER_COMPOSE='${COMPOSE_COMMAND}'"
+                    }
+                }
+            }
+
+            stage("Push Containers") {
+                pushContainerImage("accounts-receivable-funding-group-consumer", "${env.VERSION}")
+            }
+
+            stage('Deploy to DEV Environment') {
+                build(job: "Deployment/ps-tag-accounts-receivable/main",
+                        propagate: true,
+                        wait: true,
+                        parameters: [
+                                string(name: 'VERSION', value: env.VERSION),
+                                string(name: 'REGION', value: 'us-east-1'),
+                                string(name: 'ENVIRONMENT', value: 'dev')
+                        ])
+            }
+
+        }
+    } catch (Exception e) {
+        currentBuild.result = 'FAILURE'
+        println e.toString()
+    } finally {
+        def logFile = "${env.CHANGE_BRANCH}-${env.BUILD_NUMBER}.log"
+        sh "${COMPOSE_COMMAND} logs > ${logFile}"
+        zip archive: true, glob: "${logFile}", zipFile: "${logFile}.zip"
+
+        sh "make docker-clean DOCKER_COMPOSE='${COMPOSE_COMMAND}'"
+        notifyGoogle(currentBuild.result, "Accounts Receivable Merge Build")
+    }
+}

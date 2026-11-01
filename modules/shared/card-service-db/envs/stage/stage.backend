@@ -1,0 +1,5 @@
+bucket         = "corp-stage-terraform-state-store-us-east-1"
+dynamodb_table = "tag-stage-state-store"
+encrypt        = true
+key            = "app-aurora-postgres-stage.tfstate"
+region         = "us-east-1"

@@ -1,0 +1,159 @@
+# terraform-plan.yaml
+# terraform-plan configuration
+
+name: Terraform Plan
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: The semver of the workflow for automated tagging.
+        default: 1.0.1
+        type: string
+        required: false
+      backend_config_path:
+        required: true
+        type: string
+        description: "backend config file with path relative to the working directory (format: ../environment/{ENV}/{REGION}/{ENV}.backend)"
+      environment:
+        required: true
+        type: string
+      region:
+        required: true
+        type: string
+      terraform_variables:
+        description: "List of Terraform variables to pass as -var options (format: name=value\nname2=value2)"
+        type: string
+        required: false
+        default: ""
+      var_file_path:
+        required: true
+        type: string
+        description: "tfvars file with path relative to the working directory (format: ../environment/{ENV}/{REGION}/{ENV}.tfvars)"
+      working_directory:
+        required: true
+        type: string
+        description: "Directory containing Terraform code main file (format: ./deployments/terraform/root-module)"
+    outputs:
+      plan_cache_key:
+        description: "Cache key for Terraform plan"
+        value: ${{ jobs.terraform-plan.outputs.plan_cache_key }}
+      plan_changed:
+        description: "Whether the plan contains changes"
+        value: ${{ jobs.terraform-plan.outputs.plan_changed }}
+
+jobs:
+  terraform-plan:
+    name: Plan changes in ${{ inputs.environment }} to ${{ inputs.region }}
+    runs-on: team-${{ inputs.environment }}
+    outputs:
+      plan_cache_key: ${{ steps.cache-key.outputs.CACHE_KEY }}
+      plan_changed: ${{ steps.terraform.outputs.CHANGES }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.working_directory }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Get Read Only Token
+        id: generate_token
+        uses: example-org/fabric-action-github-app-token@v1
+        with:
+          secret: ${{ secrets.FABRIC_SHARED_ACTION_READONLY_KEY }}
+
+      - name: Add GitHub Token to env
+        run: echo "GH_TOKEN=${GH_TOKEN}" >> $GITHUB_ENV
+        env:
+          GH_TOKEN: ${{ steps.generate_token.outputs.token }}
+
+      - name: Prepare Terraform variables
+        id: prepare-vars
+        run: |
+          terraform_variables=""
+          # Process terraform_variables input if provided
+          if [[ -n "${{ inputs.terraform_variables }}" ]]; then
+            # Split by newlines only
+            IFS=$'\n'
+            vars_array=(${{ inputs.terraform_variables }})
+            for var in "${vars_array[@]}"; do
+              if [[ -n "$var" ]]; then
+                # Strip any whitespace
+                var=$(echo "$var" | xargs)
+                terraform_variables="$terraform_variables -var $var"
+              fi
+            done
+          fi
+          echo "terraform_variables=${terraform_variables}" >> $GITHUB_OUTPUT
+
+      - name: Run terraform
+        id: terraform
+        uses: docker://registry.example.com/tag-docker-prod-federated-us/tag/tag-utilities/tag-terraform:1.6.5
+        with:
+          entrypoint: /bin/bash
+          args: |
+            -c "
+              set -e
+              set -o pipefail
+              git config --global url.\"https://noop:${GH_TOKEN}@github.com/example-org\".insteadOf \"https://github.com/example-org\"
+              cd ${{ inputs.working_directory }}
+
+              echo \"Running terraform init...\"
+              if ! terraform init -backend-config=${{ inputs.backend_config_path }} -input=false -no-color; then
+                echo \"Terraform init failed\"
+                exit 1
+              fi
+
+              echo ""
+              echo \"Running terraform validate...\"
+              if ! terraform validate -no-color; then
+                echo \"Terraform validation failed\"
+                exit 1
+              fi
+
+              echo ""
+              echo \"Running terraform plan...\"
+              code=0
+              terraform plan -var-file=${{ inputs.var_file_path }} ${{ steps.prepare-vars.outputs.terraform_variables }} -no-color -detailed-exitcode -out=tf.plan || code=$?
+              PLAN_DETAILS=$(terraform show -no-color tf.plan)
+
+              case $code in
+                0)
+                  echo \"No changes detected\"
+                  echo \"## Terraform Plan\" >> $GITHUB_STEP_SUMMARY
+                  echo \"No changes needed\" >> $GITHUB_STEP_SUMMARY
+                  echo \"CHANGES=false\" >> $GITHUB_OUTPUT
+                  ;;
+                1)
+                  echo \"Terraform plan failed\"
+                  exit 1
+                  ;;
+                2)
+                  echo \"Plan contains changes\"
+                  echo \"## Terraform Plan Summary\" >> $GITHUB_STEP_SUMMARY
+                  echo \"<details><summary>Show Plan</summary>\" >> $GITHUB_STEP_SUMMARY
+                  echo \"\" >> $GITHUB_STEP_SUMMARY
+                  echo \"\`\`\`hcl\" >> $GITHUB_STEP_SUMMARY
+                  echo \"${PLAN_DETAILS}\" >> $GITHUB_STEP_SUMMARY
+                  echo \"\`\`\`\" >> $GITHUB_STEP_SUMMARY
+                  echo \"</details>\" >> $GITHUB_STEP_SUMMARY
+                  echo \"CHANGES=true\" >> $GITHUB_OUTPUT
+                  ;;
+                *)
+                  echo \"Unexpected exit code from terraform plan: $code\"
+                  exit 1
+                  ;;
+              esac
+            "
+
+      - name: Setup Cache Key
+        if: ${{ steps.terraform.outputs.CHANGES == 'true' }}
+        id: cache-key
+        run: echo "CACHE_KEY=terraform-plan-${{ hashFiles(format('{0}/tf.plan', inputs.working_directory)) }}" >> $GITHUB_OUTPUT
+
+      - name: Save Terraform Plan
+        if: ${{ steps.terraform.outputs.CHANGES == 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          key: ${{ steps.cache-key.outputs.CACHE_KEY }}
+          path: ${{ inputs.working_directory }}/tf.plan

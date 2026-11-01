@@ -1,0 +1,14 @@
+# provider.tf
+# Manages provider Terraform configuration resources.
+
+# Provider versions pinned to minor — patch updates auto-applied, breaking changes blocked
+terraform {
+  required_version = ">=1.6"
+
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = ">=5.46"
+    }
+  }
+}

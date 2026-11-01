@@ -1,0 +1,71 @@
+#!groovy
+
+properties(
+        [
+                ([
+                        $class       : 'DatadogJobProperty',
+                        tagProperties: "jenkins.job.duration,jenkins.job.status"
+                ])
+        ]
+)
+
+disableConcurrentBuilds()
+
+node("dev") {
+    stage('Prep') {
+        SCM_CHECKOUT = checkout scm
+        env.GIT_COMMIT=SCM_CHECKOUT.GIT_COMMIT
+        env.VERSION="RC-${env.GIT_COMMIT}"
+        buildName "${env.BUILD_NUMBER}) ${env.VERSION}"
+
+    }
+
+    try {
+        stage("Build Apps") {
+            builder = docker.build("tag/mock-builder",
+                    "-f ./docker/builder/Dockerfile ./docker/builder/")
+            builder.inside("-u root") {
+                sh 'make'
+            }
+        }
+
+        stage("Create Containers") {
+            test_harness = docker.build("test-harness:${env.VERSION}",
+                    " --tag test-harness:latest -f ./Dockerfile.test_harness .")
+
+            mock_coreplatform = docker.build("mock-service-mock-coreplatform:${env.VERSION}",
+                    " --tag mock-service-mock-coreplatform:latest -f ./Dockerfile.mock_coreplatform .")
+
+            mock_chronos = docker.build("mock-chronos:${env.VERSION}",
+                    " --tag mock-chronos:latest -f ./Dockerfile.mock_chronos .")
+
+
+        }
+
+        stage("Push Containers") {
+
+            pushContainerImage('test-harness',"${env.VERSION}")
+            pushContainerImage('mock-service-mock-coreplatform',"${env.VERSION}")
+            pushContainerImage('mock-chronos',"${env.VERSION}")
+            pushContainerImage('test-harness','latest')
+            pushContainerImage('mock-service-mock-coreplatform','latest')
+            pushContainerImage('mock-chronos','latest')
+
+        }
+
+        stage ('Deploy to DEV Environment') {
+            build(  job: 'Deployment/ps-tag-test-harness/master',
+                    propagate: true,
+                    wait: true,
+                    parameters: [
+                            string(name: 'VERSION', value: env.VERSION),
+                            string(name: 'ENVIRONMENT', value: 'dev')
+                    ])
+        }
+    } catch (Exception e) {
+        currentBuild.result = 'FAILURE'
+        println e.toString()
+    } finally {
+        notifyGoogle(currentBuild.result, "TAG Test Harness Merge")
+    }
+}

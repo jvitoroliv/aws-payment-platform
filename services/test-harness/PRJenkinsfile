@@ -1,0 +1,38 @@
+#!groovy
+
+properties([
+  [
+    $class: 'DatadogJobProperty',
+    tagProperties: "jenkins.job.duration,jenkins.job.status"
+  ]
+])
+
+node('dev') {
+    try {
+        stage('Prep') {
+            buildName "${env.BUILD_NUMBER}) ${env.CHANGE_BRANCH}"
+            buildDescription "${env.CHANGE_BRANCH} => ${env.CHANGE_TARGET}. \nChange Author: ${env.CHANGE_AUTHOR}"
+            deployEnv = "dev"
+            env.ENVIRONMENT_VERSION = "${env.BRANCH_NAME}${env.BUILD_NUMBER}".toLowerCase().minus("pr").minus("-").take(6)
+            //this needs to be all lowercase
+            SCM_CHECKOUT = checkout scm
+            skipCI = sh(script: "git log -1 | grep '\\[SKIP CI\\]'", returnStatus: true)
+
+        }
+
+        stage('Test') {
+            checkout scm
+
+            builder = docker.build("tag/mock-builder",
+                    "-f ./docker/builder/Dockerfile .")
+            builder.inside("-u root") {
+                sh "make test_no_lint"
+            }
+        }
+    } catch (Exception e) {
+        currentBuild.result = 'FAILURE'
+        println e.toString()
+    } finally {
+        notifyGoogle(currentBuild.result, "TAG Test Harness PR")
+    }
+}

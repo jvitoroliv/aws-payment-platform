@@ -1,0 +1,251 @@
+# docker-compose.yml
+# local development environment
+
+services:
+  card-service-api:
+    image: "${DOCKER_REGISTRY-registry.example.io/docker-nonprod/app/}card-service-api:${VERSION:-local}"
+    ports:
+      - "8001:8001"
+    build:
+      context: ./
+      dockerfile: ./cmd/card-service-api/config/Dockerfile
+      args:
+        - GITHUB_USERNAME=${GITHUB_USERNAME-}
+        - GITHUB_AUTH_TOKEN=${GITHUB_AUTH_TOKEN-}
+    # GitHub Environment — enables deployment protection rules and secrets scoping
+    environment:
+      - CONFIG_PATH=/debug/cmd/card-service-api/config
+      - ENVIRONMENT=docker
+      - LOCALSTACK=true
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://datadog-agent:4317
+    depends_on:
+      postgres-database:
+        condition: service_healthy
+      localstack:
+        condition: service_healthy
+    volumes:
+      - ./:/debug
+
+  company-consumer:
+    image: "${DOCKER_REGISTRY-registry.example.io/docker-nonprod/app/}card-service-company-consumer:${VERSION:-local}"
+    container_name: company-consumer
+    build:
+      context: ./
+      dockerfile:  ./cmd/company-consumer/config/Dockerfile
+      args:
+        - GITHUB_USERNAME=${GITHUB_USERNAME-}
+        - GITHUB_AUTH_TOKEN=${GITHUB_AUTH_TOKEN-}
+    environment:
+      - CONFIG_PATH=/debug/cmd/company-consumer/config
+      - ENVIRONMENT=docker
+    depends_on:
+      postgres-database:
+        condition: service_healthy
+    volumes:
+      - ./:/debug
+
+  card-producer:
+    image: "${DOCKER_REGISTRY-registry.example.io/docker-nonprod/app/}card-producer:${VERSION:-local}"
+    build:
+      context: ./
+      dockerfile: ./cmd/card-producer/config/Dockerfile
+      args:
+        - GITHUB_USERNAME=${GITHUB_USERNAME-}
+        - GITHUB_AUTH_TOKEN=${GITHUB_AUTH_TOKEN-}
+    environment:
+      - CONFIG_PATH=/debug/cmd/card-producer/config
+      - ENVIRONMENT=docker
+      - LOCALSTACK=true
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://datadog-agent:4317
+    depends_on:
+      postgres-database:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    volumes:
+      - ./:/debug
+
+  card-dispatcher:
+    image: "${DOCKER_REGISTRY-registry.example.io/docker-nonprod/app/}card-dispatcher:${VERSION:-local}"
+    build:
+      context: ./
+      dockerfile: ./cmd/card-dispatcher/config/Dockerfile
+      args:
+        - GITHUB_USERNAME=${GITHUB_USERNAME-}
+        - GITHUB_AUTH_TOKEN=${GITHUB_AUTH_TOKEN-}
+    environment:
+      - CONFIG_PATH=/debug/cmd/card-dispatcher/config
+      - ENVIRONMENT=docker
+      - LOCALSTACK=true
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://datadog-agent:4317
+    depends_on:
+      postgres-database:
+        condition: service_healthy
+    volumes:
+      - ./:/debug
+
+  card-service-db-datadog-agent:
+    image: "${DOCKER_REGISTRY-registry.example.io/docker-nonprod/app/}card-service-db-datadog-agent:${VERSION:-local}"
+    build:
+      context: ./
+      dockerfile: ./cmd/db-datadog-agent/Dockerfile
+    environment:
+      - DD_API_KEY=${DD_API_KEY}
+      - DD_CLOUD_PROVIDER_METADATA=""
+      - DD_CONFD_PATH=/config/docker
+      - DD_ENV=docker
+      - DD_HOSTNAME=${USER}
+    depends_on:
+      flyway:
+        condition: service_completed_successfully
+      postgres-database:
+        condition: service_healthy
+    profiles:
+      - db-datadog-agent
+    read_only: true
+
+  postgres-database:
+    image: card-service-postgres:${VERSION:-local}
+    build:
+      context: ./
+      dockerfile: ./flyway/Dockerfile
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: cards
+      POSTGRES_USER: cards
+      POSTGRES_HOST_AUTH_METHOD: trust
+    expose:
+      - "5432"
+    healthcheck:
+        test: [ "CMD-SHELL", "pg_isready -d cards -U cards" ]
+        interval: 5s
+        timeout: 5s
+        retries: 5
+    pull_policy: never
+
+  flyway:
+    image: registry.example.com/flyway/flyway:10
+    volumes:
+        - ./flyway:/flyway/sql
+    depends_on:
+      postgres-database:
+        condition: service_healthy
+    environment:
+        - DB_URL=jdbc:postgresql://postgres-database:5432/cards
+        - DB_USER=cards
+        - DB_PASSWORD=
+        - FLYWAY_CONFIG_FILES=sql/flyway.toml
+        - FLYWAY_LOCATIONS=filesystem:sql/db/migrations,filesystem:sql/db/seeds/docker
+    command: migrate
+
+  microservice-dev:
+    image: registry.example.com/mockserver/mockserver:5.15.0
+    ports:
+        - "1080:1080"
+    environment:
+      MOCKSERVER_INITIALIZATION_JSON_PATH: "/config/*.json"
+    volumes:
+        - type: bind
+          source: ./test/mockserver
+          target: /config
+
+  localstack:
+    image: registry.example.com/localstack/localstack:3.0.2
+    ports:
+      - "4566:4566"
+    environment:
+      - SERVICES=secretsmanager
+    volumes:
+      - "./test/localstack:/etc/localstack/init/ready.d/"
+
+  zookeeper:
+    image: registry.example.com/confluentinc/cp-zookeeper:7.5.1
+    expose:
+      - 2181
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+
+  kafka:
+    image: registry.example.com/bitnami/kafka:3.1.2
+    expose:
+      - 7777
+      - 27777
+    depends_on:
+      - zookeeper
+    environment:
+      - KAFKA_CFG_ZOOKEEPER_CONNECT=zookeeper:2181
+      - ALLOW_PLAINTEXT_LISTENER=yes
+      - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=CLIENT:PLAINTEXT,EXTERNAL:PLAINTEXT
+      - KAFKA_CFG_LISTENERS=CLIENT://:7777,EXTERNAL://:27777
+      - KAFKA_CFG_ADVERTISED_LISTENERS=CLIENT://kafka:7777,EXTERNAL://kafka:27777
+      - KAFKA_CFG_INTER_BROKER_LISTENER_NAME=CLIENT
+      - KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE=true
+      - KAFKA_CFG_OFFSETS_REPLICATION_FACTOR=1
+      - KAFKA_CFG_CONFLUENT_SCHEMA_REGISTRY_URL=http://karapace-registry:7878
+      - KAFKA_CFG_NUM_PARTITIONS=3
+    healthcheck:
+      test: ["CMD", "/opt/bitnami/kafka/bin/kafka-topics.sh", "--list", "--bootstrap-server", "localhost:7777"]
+      interval: 20s
+      timeout: 15s
+      retries: 6
+      start_period: 60s
+
+  karapace-registry:
+    image: registry.example.com/aiven-open/karapace:3.9.0
+    entrypoint:
+      - /bin/bash
+      - /opt/karapace/start.sh
+      - registry
+    depends_on:
+      kafka:
+        condition: service_healthy
+    expose:
+      - 7878
+    environment:
+      KARAPACE_ADVERTISED_HOSTNAME: karapace-registry
+      KARAPACE_BOOTSTRAP_URI: kafka:27777
+      KARAPACE_PORT: 7878
+      KARAPACE_HOST: 0.0.0.0
+      KARAPACE_CLIENT_ID: karapace
+      KARAPACE_GROUP_ID: karapace-registry
+      KARAPACE_MASTER_ELIGIBITY: "true"
+      KARAPACE_TOPIC_NAME: _schemas
+      KARAPACE_LOG_LEVEL: WARNING
+      KARAPACE_COMPATIBILITY: FORWARD_TRANSITIVE
+
+  register-schema:
+    build:
+      context: .
+      dockerfile: test/kafka/Dockerfile
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      SCHEMA_REGISTRY_URL: http://karapace-registry:7878
+
+  mock-tokenizer:
+    build:
+      context: .
+      dockerfile: test/Dockerfile
+      args:
+        GITHUB_USERNAME: ${GITHUB_USERNAME-}
+        GITHUB_AUTH_TOKEN: ${GITHUB_AUTH_TOKEN-}
+    command: ["python3", "/app/test/mockserver/tokenizer.py"]
+    ports:
+      - "8085:8085"
+
+  kafka-ui:
+    image: registry.example.com/provectuslabs/kafka-ui:v0.7.1
+    ports:
+      - "8080:8080"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:27777
+      KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
+      KAFKA_CLUSTERS_0_SCHEMAREGISTRY: http://karapace-registry:7878
+    profiles:
+      - test-kafka-producer

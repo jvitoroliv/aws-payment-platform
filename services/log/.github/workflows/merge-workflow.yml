@@ -1,0 +1,25 @@
+# merge-workflow.yml — merge-workflow configuration
+
+# merge-workflow.yml — merge-workflow configuration
+
+name: Merge Workflow
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  test:
+    runs-on: team-dev
+    container:
+      image: registry.example.io/docker-prod/app/tag-utilities/builder:1.21.3
+      options: --user root
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Test
+        run: |
+          go mod vendor
+          go test ./log

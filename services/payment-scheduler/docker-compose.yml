@@ -1,0 +1,64 @@
+# docker-compose.yml — local development environment
+
+# docker-compose.yml — local development environment
+
+services:
+  payment-scheduler-api:
+    image: "${DOCKER_REGISTRY-registry.example.io/docker-nonprod/app/}payment-scheduler-api:${VERSION:-local}"
+    build:
+      context: ./
+      dockerfile: Dockerfile
+      args:
+        - BINARY_FILE=./build/payment-scheduler-api
+    # GitHub Environment — enables deployment protection rules and secrets scoping
+    environment:
+      - CONFIG_PATH=/debug/configs
+      - ENVIRONMENT=docker
+    depends_on:
+      - mongo-database
+      - builder
+    volumes:
+      - ./:/debug
+
+  builder:
+    image: "registry.example.com/golang:1.22-bullseye"
+    environment:
+      - GOCACHE=/go/src/github.com/example-org/ps-tag-payment-service/.cache
+      - GH_TOKEN=${GH_TOKEN}
+      - CGO_ENABLED=0
+      - GIT_COMMIT="${GIT_COMMIT:-local}"
+      - GO_ARGS=${GO_ARGS}
+      - GOBIN=/go/src/github.com/example-org/ps-tag-payment-service
+      - COMPONENT_TESTS=true
+    volumes:
+      - ./:/go/src/github.com/example-org/ps-tag-payment-service
+      - ./.mod:/go/pkg/mod
+    command:
+      - tail
+      - -f
+      - /dev/null
+    working_dir: /go/src/github.com/example-org/ps-tag-payment-service
+
+  mongo-database:
+    image: registry.example.com/mongo:7.0
+    command: [ "--replSet", "rs0" ]
+    working_dir: /jsfiles
+    healthcheck:
+      test: echo "try { rs.status() } catch (err) { rs.initiate({_id:'rs0',members:[{_id:0,host:'mongo-database:27017'}]}); while (! db.hello().isWritablePrimary ) sleep(1); }" | mongosh --port 27017 --quiet
+      interval: 10s
+      timeout: 5s
+      start_period: 0s
+      retries: 4
+    expose:
+      - "27017"
+
+  tag-core:
+    image: registry.example.com/mockserver/mockserver:5.15.0
+    ports:
+      - "8003:1080"
+    environment:
+      MOCKSERVER_INITIALIZATION_JSON_PATH: "/config/tag.json"
+    volumes:
+      - type: bind
+        source: ./test/mockserver
+        target: /config

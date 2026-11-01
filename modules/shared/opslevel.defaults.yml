@@ -1,0 +1,22 @@
+# opslevel.defaults.yml — opslevel.defaults configuration
+
+# opslevel.defaults.yml — opslevel.defaults configuration
+
+version: 1
+repository:
+  tier: tier_1
+  owner: tag
+  tags:
+service:
+  lifecycle: generally_available
+  tier: tier_1
+  product:
+  owner: tag
+  language:
+  framework:
+  description:
+  tags:
+    - key: pci
+      value: false
+  repositories:
+  tools:

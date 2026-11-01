@@ -1,0 +1,61 @@
+# docker-compose.yml
+# local development environment
+
+version: "3.5"
+
+services:
+  app-local-instrumented:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3003:3003"
+    # GitHub Environment — enables deployment protection rules and secrets scoping
+    environment:
+      - NODE_ENV=local
+      - PLATFORM-SERVICES_LOG_NAME=chargebacks.initiation
+      - TAG_API_USERNAME=foo
+      - TAG_API_PASSWORD=bar
+      - UPTIME_MINUTES=.1
+      - ADO_ARTIFACTS_PASSWORD=foo
+      - ADO_ARTIFACTS_USERNAME=bar
+    networks:
+      - local
+    command: npm run app-release-instrumented
+  app-local:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3003:3003"
+    environment:
+      - NODE_ENV=local
+      - PLATFORM-SERVICES_LOG_NAME=chargebacks.initiation
+      - TAG_API_USERNAME=foo
+      - TAG_API_PASSWORD=bar
+      - ADO_ARTIFACTS_PASSWORD=foo
+      - ADO_ARTIFACTS_USERNAME=bar
+    networks:
+      - local
+    command: npm run app-release
+  unit-tests-local:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - NODE_ENV=local
+      - PLATFORM-SERVICES_LOG_NAME=chargebacks.initiation
+      - TAG_API_USERNAME=foo
+      - TAG_API_PASSWORD=bar
+      - JEST_REPORT_FILE=./coverage/test-report.json
+      - ADO_ARTIFACTS_PASSWORD=foo
+      - ADO_ARTIFACTS_USERNAME=bar
+    ports:
+      - "3003:3003"
+    networks:
+      - local
+    command: npm run unit-tests-release
+networks:
+  local:
+    external:
+      name: platform-services

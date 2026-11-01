@@ -1,0 +1,15 @@
+# pr-title-check-call.yaml
+# pr-title-check-call configuration
+
+---
+name: PR Title Validation Shared Actions Repo
+
+on:
+  pull_request:
+
+jobs:
+  check-title:
+    uses: example-org/shared-actions/.github/workflows/pr-title-check.yaml@pr-title-check-v1
+    with:
+      skip_author_list: "app/renovate,app/dependabot"
+      jira_project: "PROJ"

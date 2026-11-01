@@ -1,0 +1,110 @@
+# docker-compose.yml — local development environment
+
+# docker-compose.yml — local development environment
+
+services:
+  mongo:
+    image: mongo:7.0
+    container_name: payment-service-mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - ./scripts/mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
+    networks:
+      - local
+    command: ["--replSet", "rs0", "--bind_ip_all"]
+    healthcheck:
+      test: |
+        mongosh --quiet --eval "
+          try {
+            db.runCommand('ping').ok && rs.status().ok
+          } catch (e) {
+            exit(1)
+          }
+        " localhost:27017
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  localstack:
+    image: localstack/localstack:latest
+    container_name: payment-service-localstack
+    privileged: true
+    ports:
+      - "4566-4599:4566-4599"
+    volumes:
+      - ./scripts/init-aws.sh:/etc/localstack/init/ready.d/init-aws.sh
+    # GitHub Environment — enables deployment protection rules and secrets scoping
+    environment:
+      - SERVICES=${SERVICES- }
+      - DEBUG=${DEBUG- }
+      - PORT_WEB_UI=${PORT_WEB_UI- }
+      - LAMBDA_EXECUTOR=${LAMBDA_EXECUTOR- }
+      - KINESIS_ERROR_PROBABILITY=${KINESIS_ERROR_PROBABILITY- }
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      - HOSTNAME=localstack
+      - HOSTNAME_EXTERNAL=localhost
+    secrets:
+      - localstack_aiven_user_cert
+      - localstack_aiven_user_key
+    depends_on:
+      - mongo
+    networks:
+      - local
+
+  sftp-server:
+    image: debian:stable-slim
+    container_name: payment-service-sftp-server
+    ports:
+      - "2222:22"
+    command: scripts/sftp-server-init.sh
+    volumes:
+      - ./scripts:/scripts
+    networks:
+      - local
+
+  sql-server:
+    image: mcr.microsoft.com/mssql/server:2017-latest
+    container_name: payment-service-sql-server
+    environment:
+      - ACCEPT_EULA=Y
+      - MSSQL_SA_PASSWORD=TestingPW10 # Set a strong password for the SA user
+    ports:
+      - "1433:1433"
+    hostname: payment-service-sql-server
+    networks:
+      - local
+    volumes:
+      - localstack-vol:/var/opt/mssql # Mount the volume for SQL Server data persistence
+
+  init-db:
+    image: mcr.microsoft.com/mssql/server:2017-latest
+    container_name: init-database
+    volumes:
+      - ./scripts/init-database.sql:/docker-entrypoint-initdb.d/init-database.sql
+    depends_on:
+        - sql-server
+    networks:
+      - local
+    command: >
+      bash -c -e '
+      echo "Waiting for SQL Server to start...";
+      sleep 30s;
+      /opt/mssql-tools/bin/sqlcmd -C -S payment-service-sql-server -U sa -P TestingPW10 -d master -i docker-entrypoint-initdb.d/init-database.sql;
+      echo "All done!";
+      '
+    restart: 'no'
+
+volumes:
+  localstack-vol: #declare the volume for the compose file
+
+networks:
+  local:
+    name: payment-service-local
+
+secrets:
+  localstack_aiven_user_cert:
+    file: scripts/aws_secrets/payment-service-aiven-user-cert.txt
+  localstack_aiven_user_key:
+    file: scripts/aws_secrets/payment-service-aiven-user-key.txt

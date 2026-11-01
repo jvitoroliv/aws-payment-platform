@@ -1,0 +1,139 @@
+# action.yaml
+# action configuration
+# Maintained by: Platform Engineering
+
+# action.yaml — action configuration
+
+name: gchat
+description: Notify Google Chat
+
+inputs:
+  version:
+    description: The semver of the action for automated tagging.
+    default: 1.0.1
+    required: false
+  message:
+    description: Message to appear in Google Chat
+    required: true
+  jobsuccessfull:
+    description: Whether the run was successful or not. Takes only two values Succeeded or Failed
+    required: true
+  repositoryurl:
+    description: URL of the repository
+    required: true
+  commiturl:
+    description: URL of the latest git commit
+    required: true
+  branchname:
+    description: Branch name which triggered the job
+    required: true
+  runurl:
+    description: URL of the GitHub job
+    required: true
+  actor:
+    description: Name of the person whose action triggered
+    required: true
+  vault_webhook_url:
+    description: Google Chat webhook URL
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Import Secrets from Vault
+      id: vaultSecret
+      uses: example-org/fabric-action-hashi-vault@v1
+      with:
+        namespace: admin/tag/applications
+        role_name: dev-aws-role
+        secrets: |
+          ${{ inputs.vault_webhook_url }} webhook_url | gchat_webhook_url
+    - name: Send Notification
+      shell: sh
+      run: |
+        curl -X POST -H "Content-Type: application/json" "${{ env.GCHAT_WEBHOOK_URL }}" -d '{
+          "cardsV2": [
+            {
+              "cardId": "card1",
+              "card": {
+                "header": {
+                  "title": "${{ inputs.message }}"
+                },
+                "sections": [
+                  {
+                    "widgets": [
+                      {
+                        "decoratedText": {
+                          "icon": {
+                            "knownIcon": "STAR"
+                          },
+                          "text": "Job ${{ inputs.jobsuccessfull }}"
+                        }
+                      },
+                      {
+                        "decoratedText": {
+                          "icon": {
+                            "knownIcon": "STAR"
+                          },
+                          "text": "${{ inputs.actor }}"
+                        }
+                      },
+                      {
+                        "decoratedText": {
+                          "icon": {
+                            "knownIcon": "STAR"
+                          },
+                          "text": "${{ inputs.branchname }}"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "header": "Quick Links",
+                    "widgets": [
+                      {
+                        "buttonList": {
+                          "buttons": [
+                            {
+                              "text": "Go to repo",
+                              "onClick": {
+                                "openLink": {
+                                  "url": "${{ inputs.repositoryurl }}"
+                                }
+                              },
+                              "icon": {
+                                "knownIcon": "STAR"
+                              }
+                            },
+                            {
+                              "text": "Go to action run",
+                              "onClick": {
+                                "openLink": {
+                                  "url": "${{ inputs.runurl }}"
+                                }
+                              },
+                              "icon": {
+                                "knownIcon": "STAR"
+                              }
+                            },
+                            {
+                              "text": "Go to commit",
+                              "onClick": {
+                                "openLink": {
+                                  "url": "${{ inputs.commiturl }}"
+                                }
+                              },
+                              "icon": {
+                                "knownIcon": "STAR"
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          ]
+        }'

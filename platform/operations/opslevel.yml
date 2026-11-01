@@ -1,0 +1,37 @@
+# opslevel.yml — opslevel configuration
+
+# opslevel.yml — opslevel configuration
+
+---
+version: 1
+service:
+  name: TAG Ops Service
+  lifecycle: generally-available
+  tier: tier_2
+  product: TAG
+  owner: tag
+  system: tag
+  language: golang
+  framework: terraform
+  description: TAG core IaC repo
+  aliases:
+  - example-org/ps-tag-ops
+  - tag-core
+  - tag-ops
+  tags:
+  - key: containerized
+    value: 'true'
+  - key: pci
+    value: 'false'
+  - key: scope
+    value: internal
+  - key: type
+    value: devops
+  repositories:
+  - name: example-org/ps-tag-ops
+    path: "/"
+    provider: github
+  tools:
+  dependencies:
+  alert_sources:
+  properties:

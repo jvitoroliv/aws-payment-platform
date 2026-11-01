@@ -1,0 +1,107 @@
+# terraform-apply.yaml
+# terraform-apply configuration
+
+name: Terraform Apply
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: The semver of the workflow for automated tagging.
+        default: 1.0.1
+        type: string
+        required: false
+      backend_config_path:
+        required: true
+        type: string
+        description: "backend config file with path relative to the working directory (format: ../environment/{ENV}/{REGION}/{ENV}.backend)"
+      environment:
+        required: true
+        type: string
+      region:
+        required: true
+        type: string
+      skip:
+        default: false
+        description: "Skip the apply step" # Helps when using the workflow with a matrix strategy as the 'if' condition cannot be set by the matrix
+        required: false
+        type: boolean
+      plan_cache_key:
+        required: true
+        type: string
+        description: "Cache key for Terraform plan"
+      working_directory:
+        required: true
+        type: string
+        description: "Directory containing Terraform code main file (format: ./deployments/terraform/root-module)"
+
+jobs:
+  terraform-apply:
+    if: ${{ inputs.skip == false }}
+    name: Apply changes to ${{ inputs.region }}
+    runs-on: team-${{ inputs.environment }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.working_directory }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Get Read Only Token
+        id: generate_token
+        uses: example-org/fabric-action-github-app-token@v1
+        with:
+          secret: ${{ secrets.FABRIC_SHARED_ACTION_READONLY_KEY }}
+
+      - name: Add GitHub Token to env
+        run: echo "GH_TOKEN=${GH_TOKEN}" >> $GITHUB_ENV
+        env:
+          GH_TOKEN: ${{ steps.generate_token.outputs.token }}
+
+      - name: Restore Terraform Plan
+        uses: actions/cache/restore@v4
+        with:
+          fail-on-cache-miss: true
+          key: ${{ inputs.plan_cache_key }}
+          path: ${{ inputs.working_directory }}/tf.plan
+
+      - name: Run Terraform
+        uses: docker://registry.example.com/tag-docker-prod-federated-us/tag/tag-utilities/tag-terraform:1.6.5
+        with:
+          entrypoint: /bin/bash
+          args: |
+            -c "
+              set -e
+              set -o pipefail
+              git config --global url.\"https://noop:${GH_TOKEN}@github.com/example-org\".insteadOf \"https://github.com/example-org\"
+              cd ${{ inputs.working_directory }}
+
+              echo \"Running terraform init...\"
+              if ! terraform init -backend-config=${{ inputs.backend_config_path }} -input=false -no-color; then
+                echo \"## Terraform Apply Failed ❌\" >> $GITHUB_STEP_SUMMARY
+                echo \"Terraform init failed\" >> $GITHUB_STEP_SUMMARY
+                exit 1
+              fi
+
+              echo \"Running terraform apply...\"
+              if ! terraform apply -input=false -auto-approve -no-color tf.plan | tee apply.log; then
+                echo \"## Terraform Apply Failed ❌\" >> $GITHUB_STEP_SUMMARY
+                echo \"Terraform apply failed\" >> $GITHUB_STEP_SUMMARY
+                echo \"<details><summary>Show Error Output</summary>\" >> $GITHUB_STEP_SUMMARY
+                echo \"\" >> $GITHUB_STEP_SUMMARY
+                echo \"\`\`\`hcl\" >> $GITHUB_STEP_SUMMARY
+                echo \"$(cat apply.log)\" >> $GITHUB_STEP_SUMMARY
+                echo \"\`\`\`\" >> $GITHUB_STEP_SUMMARY
+                echo \"</details>\" >> $GITHUB_STEP_SUMMARY
+                exit 1
+              fi
+
+              echo \"## Terraform Apply Summary ✅\" >> $GITHUB_STEP_SUMMARY
+              echo \"Successfully applied changes to ${{ inputs.environment }} environment in ${{ inputs.region }}\" >> $GITHUB_STEP_SUMMARY
+              echo \"<details><summary>Show Output</summary>\" >> $GITHUB_STEP_SUMMARY
+              echo \"\" >> $GITHUB_STEP_SUMMARY
+              echo \"\`\`\`hcl\" >> $GITHUB_STEP_SUMMARY
+              echo \"$(cat apply.log)\" >> $GITHUB_STEP_SUMMARY
+              echo \"\`\`\`\" >> $GITHUB_STEP_SUMMARY
+              echo \"</details>\" >> $GITHUB_STEP_SUMMARY
+            "

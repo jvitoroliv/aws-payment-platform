@@ -1,0 +1,157 @@
+# flyway-workflow.yml
+# flyway-workflow configuration
+# Maintained by: Platform Engineering
+
+# flyway-workflow.yml — flyway-workflow configuration
+
+name: Flyway
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        type: choice
+        default: 'dev'
+        options:
+          - dev
+          - test
+          - stage
+          - prod
+      flyway-command:
+        description: 'Flyway action to perform'
+        required: true
+        type: choice
+        options:
+          - info
+          - migrate
+          - repair
+      git-ref:
+        description: 'Version to retrieve migrations from'
+        required: true
+        type: string
+
+env:
+  FLYWAY_VERSION: "10.15.0"
+
+jobs:
+  setup-inputs:
+    name: Set Up Inputs
+    runs-on: team-dev
+    steps:
+      - name: Set Up Inputs
+        id: inputs
+        run: |
+          ENVIRONMENT="${{ inputs.environment }}"
+          FLYWAY_COMMAND="${{ inputs.flyway-command }}"
+          GIT_REF="${{ inputs.git-ref }}"
+
+          echo "inputs.environment: $ENVIRONMENT"
+          echo "inputs.flyway-command: $FLYWAY_COMMAND"
+          echo "inputs.git-ref: $GIT_REF"
+
+          if [ -z "$ENVIRONMENT" ]; then
+            echo "Environment input is not set"
+            exit 1
+          fi
+          if [ -z "$FLYWAY_COMMAND" ]; then
+            echo "Flyway Command input is not set"
+            exit 1
+          fi
+          if [ -z "$GIT_REF" ]; then
+            echo "Git Ref input is not set"
+            exit 1
+          fi
+
+          if [[ "$ENVIRONMENT" == "dev" ]]; then
+            DB_HOSTNAME="dev-service-aurora-global-cluster.global-xxxxxxxxxxxx.global.rds.amazonaws.com"
+            FLYWAY_LOCATIONS="filesystem:flyway/db/migrations,filesystem:flyway/db/seeds/dev"
+          elif [[ "$ENVIRONMENT" == "test" ]]; then
+            DB_HOSTNAME="test-service-aurora-global-cluster.global-xxxxxxxxxxxx.global.rds.amazonaws.com"
+            FLYWAY_LOCATIONS="filesystem:flyway/db/migrations,filesystem:flyway/db/seeds/test"
+          elif [[ "$ENVIRONMENT" == "stage" ]]; then
+            DB_HOSTNAME="stage-service-aurora-global-cluster.global-xxxxxxxxxxxx.global.rds.amazonaws.com"
+            FLYWAY_LOCATIONS="filesystem:flyway/db/migrations,filesystem:flyway/db/seeds/stage"
+          elif [[ "$ENVIRONMENT" == "prod" ]]; then
+            DB_HOSTNAME="prod-service-aurora-global-cluster.global-xxxxxxxxxxxx.global.rds.amazonaws.com"
+            FLYWAY_LOCATIONS="filesystem:flyway/db/migrations,filesystem:flyway/db/seeds/prod"
+          else
+            echo "Invalid environment: $ENVIRONMENT"
+            exit 1
+          fi
+
+          # Constants
+          DB_DATABASE="cards"
+          DB_PORT="5432"
+          DB_USERNAME="github-actions-runner-iam"
+          FLYWAY_IMAGE_VERSION="${{ env.FLYWAY_VERSION }}"
+
+          # Set outputs
+          echo "DB_DATABASE=cards" >> $GITHUB_OUTPUT
+          echo "DB_HOSTNAME=$DB_HOSTNAME" >> $GITHUB_OUTPUT
+          echo "DB_PORT=5432" >> $GITHUB_OUTPUT
+          echo "DB_USERNAME=github-actions-runner-iam" >> $GITHUB_OUTPUT
+          echo "ENVIRONMENT=$ENVIRONMENT" >> $GITHUB_OUTPUT
+          echo "FLYWAY_COMMAND=$FLYWAY_COMMAND" >> $GITHUB_OUTPUT
+          echo "FLYWAY_IMAGE_VERSION=${{ env.FLYWAY_VERSION }}" >> $GITHUB_OUTPUT
+          echo "FLYWAY_LOCATIONS=$FLYWAY_LOCATIONS" >> $GITHUB_OUTPUT
+          echo "GIT_REF=$GIT_REF" >> $GITHUB_OUTPUT
+
+          echo "## Inputs" >> $GITHUB_STEP_SUMMARY
+          echo "| Caller Input         | Value                 |" >> $GITHUB_STEP_SUMMARY
+          echo "| -------------------- | --------------------- |" >> $GITHUB_STEP_SUMMARY
+          echo "| ENVIRONMENT          | $ENVIRONMENT          |" >> $GITHUB_STEP_SUMMARY
+          echo "| FLYWAY_COMMAND       | $FLYWAY_COMMAND       |" >> $GITHUB_STEP_SUMMARY
+          echo "| GIT_REF              | $GIT_REF              |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Computed Input       | Value                 |" >> $GITHUB_STEP_SUMMARY
+          echo "| -------------------- | --------------------- |" >> $GITHUB_STEP_SUMMARY
+          echo "| DB_DATABASE          | $DB_DATABASE          |" >> $GITHUB_STEP_SUMMARY
+          echo "| DB_HOSTNAME          | $DB_HOSTNAME          |" >> $GITHUB_STEP_SUMMARY
+          echo "| DB_PORT              | $DB_PORT              |" >> $GITHUB_STEP_SUMMARY
+          echo "| DB_USERNAME          | $DB_USERNAME          |" >> $GITHUB_STEP_SUMMARY
+          echo "| FLYWAY_IMAGE_VERSION | $FLYWAY_IMAGE_VERSION |" >> $GITHUB_STEP_SUMMARY
+          echo "| FLYWAY_LOCATIONS     | $FLYWAY_LOCATIONS     |" >> $GITHUB_STEP_SUMMARY
+    outputs:
+      DB_DATABASE: ${{ steps.inputs.outputs.DB_DATABASE }}
+      DB_HOSTNAME: ${{ steps.inputs.outputs.DB_HOSTNAME }}
+      DB_PORT: ${{ steps.inputs.outputs.DB_PORT }}
+      DB_USERNAME: ${{ steps.inputs.outputs.DB_USERNAME }}
+      ENVIRONMENT: ${{ steps.inputs.outputs.ENVIRONMENT }}
+      FLYWAY_COMMAND: ${{ steps.inputs.outputs.FLYWAY_COMMAND }}
+      FLYWAY_IMAGE_VERSION: ${{ steps.inputs.outputs.FLYWAY_IMAGE_VERSION }}
+      FLYWAY_LOCATIONS: ${{ steps.inputs.outputs.FLYWAY_LOCATIONS }}
+      GIT_REF: ${{ steps.inputs.outputs.GIT_REF }}
+
+  run-flyway:
+    name: Run Flyway
+    needs:
+      - setup-inputs
+    runs-on: team-${{ needs.setup-inputs.outputs.ENVIRONMENT }}
+    steps:
+
+    - name: Set permissions to allow checkout action to clean the workspace
+      run: |
+        sudo chmod -R ug+rwX ${GITHUB_WORKSPACE}
+      # NOTE: The root cause of the permissions errors appear to be the Go compiler setting
+      # directories within .mod to read only. As Github Actions run as the 'github' user (non-root)
+      # this causies the checkout action to fail when it tries to 'git clean'.
+      # We can mitigate the root cause by setting the -modcacherw GOFLAG in all Go builds: https://go.dev/ref/mod#go-clean-modcache
+
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ needs.setup-inputs.outputs.GIT_REF }}
+
+    - name: Flyway ${{ needs.setup-inputs.outputs.FLYWAY_COMMAND }}
+      uses: example-org/shared-actions/flyway@flyway-v2
+      with:
+        command: ${{ needs.setup-inputs.outputs.FLYWAY_COMMAND }}
+        db_database: ${{ needs.setup-inputs.outputs.DB_DATABASE }}
+        db_host: ${{ needs.setup-inputs.outputs.DB_HOSTNAME }}
+        db_port: ${{ needs.setup-inputs.outputs.DB_PORT }}
+        db_username: ${{ needs.setup-inputs.outputs.DB_USERNAME }}
+        db_use_iam_auth: true
+        image_version: ${{ needs.setup-inputs.outputs.FLYWAY_IMAGE_VERSION }}
+        locations: ${{ needs.setup-inputs.outputs.FLYWAY_LOCATIONS }}

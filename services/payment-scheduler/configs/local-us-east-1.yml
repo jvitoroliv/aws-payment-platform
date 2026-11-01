@@ -1,0 +1,31 @@
+# local-us-east-1.yml — local-us-east-1 configuration
+
+# local-us-east-1.yml — local-us-east-1 configuration
+
+# GitHub Environment — enables deployment protection rules and secrets scoping
+environment: local
+awsRegion: east
+scheduler:
+  cron: "0/1 * * * *"
+processor:
+  postPaymentTimeout: 3
+  postPaymentMaxRetries: 3
+  maxConsecutiveFailures: 3
+mongo:
+  dbName: payment_scheduler
+  username:
+  password:
+  uri: mongodb://localhost:27017
+  connectTimeout: 5
+  clientTimeout: 2
+server:
+  addr: ":8000"
+  ginMode: "debug"
+  timeout: 10
+tagCore:
+  baseURL: "http://localhost:8003"
+  timeout: 3
+  maxRetries: 3
+  username: any
+  password: any
+

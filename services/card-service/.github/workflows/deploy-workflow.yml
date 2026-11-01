@@ -1,0 +1,62 @@
+# deploy-workflow.yml — deployment automation
+
+# deploy-workflow.yml — deployment automation
+
+name: Deploy
+run-name: Deploy ${{ inputs.application_version }} to ${{ inputs.environment }} by @${{ github.actor }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Environment to deploy to
+        required: true
+        type: choice
+        default: 'dev'
+        options:
+          - dev
+          - test
+          - stage
+          - prod
+      regions:
+        description: YAML list of region(s) to deploy to
+        required: true
+        type: string
+        default: |
+          - us-east-1\n
+          - us-west-2
+      application_version:
+        description: Application version to deploy
+        required: true
+        type: string
+      run_migrations:
+          description: Run Flyway migrations
+          required: false
+          type: boolean
+          default: true
+      trigger_deployment:
+          description: Triggers the deployment of the service
+          required: false
+          type: boolean
+          default: true
+
+jobs:
+  deploy:
+    name: Deploy to ${{ inputs.environment }}
+    uses: example-org/shared-actions/.github/workflows/deploy-service.yaml@deploy-service-v1
+    with:
+      services: |
+        - card-dispatcher
+        - card-producer
+        - card-service-api
+        - card-service-company-consumer
+        - card-service-db-datadog-agent
+      regions: ${{ inputs.regions }}
+      environment: ${{ inputs.environment }}
+      run_migrations: ${{ inputs.run_migrations }}
+      flyway_locations: filesystem:flyway/db/migrations,filesystem:flyway/db/seeds/${{ inputs.environment }}
+      application_version: ${{ inputs.application_version }}
+      db_name: cards
+      db_secret_name: ${{ inputs.environment }}-card-service-aurora-endpoint
+      trigger_deployment: ${{ inputs.trigger_deployment }}
+    secrets: inherit

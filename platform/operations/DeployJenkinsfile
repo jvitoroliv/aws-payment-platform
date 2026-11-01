@@ -1,0 +1,194 @@
+#!groovy
+/*
+DeployJenkinsfile
+
+This pipeline is used to deploy the tag-core infrastructure to
+dev, test, stage, and prod environments.
+
+Parameters:
+    VERSION: The version of the tag-core infrastructure to deploy. Leave empty to maintain current version.
+    ENVIRONMENT: The environment to deploy to.
+    runOneShots: Whether or not to run the oneshotter (DB migration script)
+    runConfigValidator: Whether or not to run the config validator
+    ACTIVE_REGION: The AWS region to set as active. 'current' will leave as currently configured.
+
+When 'VERSION' is like 'RC-release-*' we'll run the Config Validator and Oneshotter from the release branch that matches the version.
+Otherwise, we'll run those from the master branch.
+ */
+properties(
+        [
+                parameters([
+                        string(defaultValue: '', name: 'VERSION',
+                               description: 'Code version to deploy. Leave empty to maintain current version.'),
+                        choice(choices: ['yes', 'no'].join('\n'),
+                                description: 'Run Oneshotter?',
+                                name: 'runOneShots'),
+                        choice(choices: ['yes', 'no'].join('\n'),
+                                description: 'Run Config Validator?',
+                                name: 'runConfigValidator'),
+                        choice(choices: ['dev', 'test', 'stage', 'prod'].join('\n'),
+                                description: 'environment',
+                                name: 'ENVIRONMENT'),
+                        choice(choices: ['current', 'us-east-1', 'us-west-2'], name: 'ACTIVE_REGION',
+                               description: 'AWS Region to set as active. \'current\' will leave as currently configured.'),
+                ]),
+                ([
+                        $class       : 'DatadogJobProperty',
+                        tagProperties: 'jenkins.job.duration,jenkins.job.status'
+                ])
+        ]
+)
+
+disableConcurrentBuilds()
+
+node("${params.ENVIRONMENT}") {
+    def devCodeBranch = 'master'
+
+    stage('Prep') {
+        buildName "${env.BUILD_NUMBER}) ${params.ENVIRONMENT}"
+        buildDescription "${params.ENVIRONMENT} => ${params.VERSION}\n"
+        env.AWS_DEFAULT_REGION = 'us-east-1'
+
+        // If active region is staying the same, set it to '' so Terraform will use the previous value
+        activeRegion = params.ACTIVE_REGION
+        if (activeRegion == 'current') {
+            activeRegion = ''
+        }
+
+        // If we're doing a release, VERSION will look similar to this:
+        // RC-release-190-fb5e393032e04b45373f1d96819a5778b01c8aec
+        // and devCodeBranch will be 'release-190'
+        if (params.VERSION =~ /RC-release-\d+-\w+/) {
+            devCodeBranch = params.VERSION.substring(3, 14)
+        }
+        cleanWs()
+    }
+
+    ansiColor('xterm') {
+        try {
+            checkout scm
+
+            if (params.ENVIRONMENT == 'prod' && params.VERSION == 'latest') {
+                throw new Exception('specific commit version required for prod deploys')
+            }
+
+            stage('Validate Config') {
+                withDockerRegistry(
+                        credentialsId: 'tag-devops-cloud-artifactory-creds',
+                        url: 'https://registry.example.io/'
+                ) {
+                    // Only validate Docker image if VERSION is provided
+                    if (params.VERSION?.trim()) {
+                        // Confirm that a Docker images exist for the version we're deploying
+                        sh "docker manifest inspect registry.example.io/tag-docker-nonprod-virtual-us/tag/mock-service-api:${params.VERSION}"
+                    } else {
+                        echo "Skipping Docker image validation as no version was specified"
+                    }
+
+                    if (params.runConfigValidator == 'yes') {
+                        // Confirm that the application config values are valid
+                        build(
+                                job: 'config_validator',
+                                propagate: true,
+                                wait: true,
+                                parameters: [
+                                        string(name: 'ENVIRONMENT', value: "${params.ENVIRONMENT}"),
+                                        string(name: 'GIT_BRANCH', value: "${devCodeBranch}")]
+                        )
+                    } else {
+                        println('\n************************************\nSkipping Config Validator...\n************************************\n')
+                    }
+                }
+            }
+
+            def jfrogContainer = docker.image("releases-docker.jfrog.io/jfrog/jfrog-cli-v2-jf")
+            stage('Promote image') {
+                if (params.ENVIRONMENT == 'prod') {
+                    withCredentials([usernamePassword(credentialsId: 'tag-devops-cloud-artifactory-creds', usernameVariable: 'USERNAME', passwordVariable: 'TOKEN')]) {
+                        jfrogContainer.inside('-u root') {
+                            sh "jf c add --url=https://registry.example.io/ --access-token=${TOKEN}"
+                            def imageNames = ["mock-service-api", "mock-service-common-api", "mock-service-web", "mock-service-job-coreplatform", "mock-service-job-mail",
+                                              "mock-service-job-mastercard", "mock-service-job-visa", "mock-service-job-corecard", "mock-service-job-finserv", "mock-service-job-statements",
+                                              "mock-service-job-file-arrival", "mock-service-job-scheduled-event", "mock-service-job-partner", "mock-service-job-partner_a-coreplatform", "mock-service-job-partner_a-fi",
+                                              "mock-service-job-partner-fi", "mock-service-payment-api", "mock-service-job-card-migration"]
+                            for (imageName in imageNames) {
+                                sh "jf rt dpr tag/${imageName} tag-docker-nonprod-federated-us tag-docker-prod-federated-us --source-tag ${params.VERSION} --copy=true --target-tag ${params.VERSION}"
+                            }
+                        }
+                    }
+                } else {
+                    echo 'Not a prod deployment, skipping promotion'
+                }
+            }
+
+            def tfContainer = docker.image('hashicorp/terraform:1.6.5')
+
+            notifyGoogleNewDeploy()
+
+            tfContainer.inside("-e TF_VAR_active_region=${activeRegion} -e TF_VAR_mock-service_version=${params.VERSION} --entrypoint=''") {
+                stage('Plan') {
+                    dir('terraform/tag_core') {
+                        sh "terraform init -reconfigure -backend-config=../environments/${params.ENVIRONMENT}/us-east-1/${params.ENVIRONMENT}.backend"
+                        sh "terraform plan --var-file=../environments/${params.ENVIRONMENT}/us-east-1/${params.ENVIRONMENT}.tfvars -out=${params.ENVIRONMENT}_us-east-1.planfile"
+                    }
+
+                    dir('terraform/tag_core') {
+                        sh "terraform init -reconfigure -backend-config=../environments/${params.ENVIRONMENT}/us-west-2/${params.ENVIRONMENT}.backend"
+                        sh "terraform plan --var-file=../environments/${params.ENVIRONMENT}/us-west-2/${params.ENVIRONMENT}.tfvars -out=${params.ENVIRONMENT}_us-west-2.planfile"
+                    }
+                }
+            }
+
+            // Wait for confirmation before deploying to prod
+            userInputProceed(params.ENVIRONMENT)
+
+            stage('OneShot') {
+                if (params.runOneShots == 'yes') {
+                    println('\n************************************\nONESHOTTER RUNNING IN THIS DEPLOY -->\n**************************************\n')
+                    build job: 'DBDataMigrationTool/ps-tag-dev/master', propagate: true, wait: true, parameters: [
+                            string(name: 'ENVIRONMENT', value: "${params.ENVIRONMENT}"),
+                            string(name: 'BRANCH', value: "${devCodeBranch}")
+                    ]
+                } else {
+                    println('\n************************************\nSkipping oneshotter...\n************************************\n')
+                }
+            }
+
+            stage('Apply') {
+                tfContainer.inside("--entrypoint=''") {
+                    dir('terraform/tag_core') {
+                        sh "terraform init -reconfigure -backend-config=../environments/${params.ENVIRONMENT}/us-east-1/${params.ENVIRONMENT}.backend"
+                        sh "terraform apply -auto-approve ${params.ENVIRONMENT}_us-east-1.planfile"
+                    }
+
+                    dir('terraform/tag_core') {
+                        sh "terraform init -reconfigure -backend-config=../environments/${params.ENVIRONMENT}/us-west-2/${params.ENVIRONMENT}.backend"
+                        sh "terraform apply -auto-approve ${params.ENVIRONMENT}_us-west-2.planfile"
+                    }
+                }
+            }
+        } catch (Exception e) {
+            currentBuild.result = 'FAILURE'
+            println e.toString()
+        } finally {
+            notifyGoogle(currentBuild.result, 'OPS Deployment Build')
+        }
+    }
+}
+
+void userInputProceed(String environment) {
+    Boolean proceed = false
+    if (environment == 'dev' || environment == 'test') {
+        proceed = true
+    } else {
+        timeout(time: 1, unit: 'HOURS') {
+            proceed = input(
+                    id: "${environment}", message: 'Do you approve?', parameters: [
+                    [$class: 'BooleanParameterDefinition', defaultValue: true, description: '', name: 'Please confirm Deployment']
+            ])
+        }
+    }
+    if (!proceed) {
+        error 'User decided not to proceed'
+    }
+}

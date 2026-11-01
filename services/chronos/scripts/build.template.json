@@ -1,0 +1,7 @@
+{
+  "version": "$VERSION",
+  "name": "ps-tag-chronos",
+  "number": "$VERSION",
+  "artifactoryPrincipal": "$ARTIFACTORY_PRINCIPAL",
+  "started": "$DATE"
+}

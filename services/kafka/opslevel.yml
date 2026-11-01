@@ -1,0 +1,33 @@
+# opslevel.yml — opslevel configuration
+
+# opslevel.yml — opslevel configuration
+
+---
+version: 1
+service:
+  name: TAG Kafka Service
+  lifecycle: pre-alpha
+  tier: tier_4
+  product: TAG
+  owner: tag
+  system: tag
+  language: golang
+  framework: other
+  description: Custom TAG terraform module for Kafka
+  aliases: 
+    - example-org/ps-tag-kafka
+  tags:
+    - key: pci
+      value: no 
+    - key: type
+      value: backend
+    - key: containerized
+      value: no 
+    - key: scope
+      value: internal
+  repositories:
+  - name: example-org/ps-tag-kafka
+    path: "/"
+    provider: github
+  tools: []
+  dependencies: []

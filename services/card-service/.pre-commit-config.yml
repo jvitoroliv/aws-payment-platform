@@ -1,0 +1,49 @@
+# .pre-commit-config.yml — .pre-commit-config configuration
+
+# .pre-commit-config.yml — .pre-commit-config configuration
+
+---
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.2.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-added-large-files
+      - id: check-yaml
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.29.0
+    hooks:
+      - id: yamllint
+        verbose: true # create awareness of linter findings
+        args: ["-d", "{extends: relaxed, rules: {line-length: {max: 120}}}"]
+  - repo: local
+    hooks:
+      - id: check-using-incorrect-file-type-for-yaml
+        name: Yaml files must end with .yml and not .yaml
+        entry: files must have .yml extension
+        language: fail
+        files: "^.*.yaml$"
+  - repo: local
+    hooks:
+      - id: check-running-self-hosted
+        name: Action must run only on self hosted runners
+        language: system
+        verbose: true
+        entry: |
+          bash -c '
+            files=$(find . -type f -name "*.yml" -maxdepth 10 -not -path ".git")
+            errors=""
+            for file in $files; do
+              if grep -q "runs-on" $file; then
+                grep -qE ".*runs-on:.*(self-hosted).*" $file || errors="$errors\n$file"
+              fi
+            done
+            if [ -n "$errors" ]; then
+              echo "The following files are not using self-hosted runners:\n$errors"
+              exit 1
+            else
+              exit 0
+            fi
+          '
+

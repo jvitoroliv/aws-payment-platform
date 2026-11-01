@@ -1,0 +1,30 @@
+# auto_approve_pr.yaml
+# auto_approve_pr configuration
+# Maintained by: Platform Engineering
+
+# auto_approve_pr.yaml — auto_approve_pr configuration
+
+name: Auto Approve and Merge
+
+on:
+  pull_request:
+    types:
+      - labeled
+
+jobs:
+  auto-approve-merge:
+    # Trigger only if the label is 'bypass-approval' - Expect this from Config Sync and DBSchema Sync Pipelines only
+    if: github.event.label.name == 'bypass-approval'  
+    runs-on: coreplatform-dev
+    steps:
+      - name: Auto-Approve the Pull Request
+        uses: hmarr/auto-approve-action@v4
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Auto-Merge PR
+        uses: pascalgn/automerge-action@v0.15.5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          merge-method: squash

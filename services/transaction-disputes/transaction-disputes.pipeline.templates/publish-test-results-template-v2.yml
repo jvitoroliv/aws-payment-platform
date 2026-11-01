@@ -1,0 +1,60 @@
+# publish-test-results-template-v2.yml
+# publish-test-results-template-v2 configuration
+
+parameters:
+  - name: AGENT_POOL_NAME
+    type: string
+    default: 'Linux-Build'
+  - name: DEPENDENT_JOBS
+    type: object
+    default: []
+  - name: JOB_NAME
+    type: string
+
+jobs:
+  - job: '${{ parameters.JOB_NAME }}'
+    condition: always()
+    displayName: "Publish test results"
+    dependsOn: '${{ parameters.DEPENDENT_JOBS }}'
+    workspace:
+      clean: all
+    variables:
+      disable.coverage.autogenerate: 'true'
+      CoverageReportFolderName: 'CoverageReport'
+    pool:
+      name: '${{ parameters.AGENT_POOL_NAME }}'
+
+    steps:
+      - task: UseDotNet@2
+        inputs:
+          packageType: 'sdk'
+          version: '8.x'
+
+      - task: DownloadPipelineArtifact@2
+        inputs:
+          path: '$(System.ArtifactsDirectory)'
+        displayName: 'Download test results'
+        enabled: true
+
+      - task: PublishTestResults@2
+        displayName: 'Publish test results'
+        inputs:
+          testResultsFormat: 'VSTest'
+          testResultsFiles: '**/*.trx'
+          searchFolder: '$(System.ArtifactsDirectory)'
+          mergeTestResults: false
+        enabled: true
+
+      - task: reportgenerator@5
+        displayName: 'Build code coverage report'
+        inputs:
+          reports: '$(System.ArtifactsDirectory)/**/*.xml'
+          targetdir: '$(System.ArtifactsDirectory)/$(CoverageReportFolderName)'
+          title: 'Code Coverage'
+        enabled: true
+
+      - task: PublishCodeCoverageResults@2
+        displayName: 'Publish code coverage report'
+        inputs:
+          summaryFileLocation: '$(System.ArtifactsDirectory)/$(CoverageReportFolderName)/*.xml'
+        enabled: true

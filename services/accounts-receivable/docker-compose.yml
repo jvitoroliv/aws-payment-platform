@@ -1,0 +1,18 @@
+# docker-compose.yml — local development environment
+
+# docker-compose.yml — local development environment
+
+services:
+  funding-group-consumer:
+    image: accounts-receivable-funding-group-consumer:${VERSION:-latest}
+    build:
+      context: .
+      dockerfile: cmd/funding-group-consumer/Dockerfile
+      args:
+        BUILDER_IMAGE_REPOSITORY: ${REPOSITORY_URL:-}
+        GITHUB_USERNAME: ${GITHUB_USERNAME}
+        GITHUB_AUTH_TOKEN: ${GITHUB_AUTH_TOKEN}
+    # GitHub Environment — enables deployment protection rules and secrets scoping
+    environment:
+      ENVIRONMENT: local
+    pull_policy: build

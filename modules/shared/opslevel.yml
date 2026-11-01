@@ -1,0 +1,37 @@
+# opslevel.yml
+# opslevel configuration
+
+---
+version: 1
+repository:
+  tier: tier_1
+  owner: tag
+  tags:
+service:
+  name: TAG Terraform Shared
+  lifecycle: generally-available
+  tier: tier_1
+  product: TAG
+  owner: tag
+  language: hcl
+  framework: terraform
+  description: Shared Terraform for TAG infrastructure.
+  aliases:
+    - example-org/shared-terraform
+    - TAG Terraform Shared
+  tags:
+    - key: type
+      value: infrastructure
+    - key: pci
+      value: false
+    - key: containerized
+      value: true
+    - key: scope
+      value: internal
+  repositories:
+    - name: example-org/shared-terraform
+      path: "/"
+      provider: github
+  tools:
+  dependencies:
+  alert_sources:

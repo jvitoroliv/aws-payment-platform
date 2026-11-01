@@ -1,0 +1,11 @@
+{
+  "configurations": {
+    "ignore": [
+      "**/.github/**",
+      "**/*.yml",
+      "**/github/workspace/.github/workflows/**",
+      "**/github/workspace/.github/linters/**"
+    ],
+    "absolute": true
+  }
+}

@@ -1,0 +1,42 @@
+#!groovy
+
+properties(
+        [
+                parameters([
+                        string(defaultValue: 'master', name: 'BRANCH'),
+                        choice(choices: ["dev", "test", "stage", "prod"].join("\n"),
+                                description: 'environment',
+                                name: 'ENVIRONMENT')
+                ]),
+                ([
+                        $class       : 'DatadogJobProperty',
+                        tagProperties: "jenkins.job.duration,jenkins.job.status"
+                ])
+        ]
+)
+
+node("${params.ENVIRONMENT}") {
+    stage('Apply') {
+        checkout scm
+        def ARTIFACTORY_URL = "registry.example.io/docker-prod/app/tag-utilities"
+        def ONE_SHOTTER_VERSION = "1.1.0"
+        def oneshotContainer = docker.image("${ARTIFACTORY_URL}/oneshotter:${ONE_SHOTTER_VERSION}")
+        withDockerRegistry(
+                credentialsId: 'tag-devops-cloud-artifactory-creds',
+                url: 'https://registry.example.io/'
+        ) {
+            oneshotContainer.pull()
+            withCredentials([usernamePassword(credentialsId: 'tag-devops-cloud-artifactory-creds', passwordVariable: 'ARTIFACTORY_PASSWORD', usernameVariable: 'ARTIFACTORY_USER')]) {
+                oneshotContainer.inside(
+                        """-u root \
+                        -v ${WORKSPACE}/scripts/mongo_one_shots:/src \
+                        -e DATABASE_NAME="chronos"
+                    """) {
+                    sh "/oneshotter -environment=${params.ENVIRONMENT} -src=/src"
+
+                }
+            }
+        }
+
+    }
+}

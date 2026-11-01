@@ -1,0 +1,57 @@
+# pr-metrics.yml
+# pr-metrics configuration
+
+name: 'Fortnightly PR metrics'
+on:
+  workflow_dispatch:
+  schedule:
+  - cron: 0 0 22 * WED # Every Wednesday at 22:00 UTC. CRON doesn't support fortnightly cadence.
+
+permissions:
+  issues: write
+  pull-requests: read
+
+jobs:
+  build:
+    name: pr metrics
+    runs-on: team-dev
+    env:
+      issue-lookup-label: automated-issue
+
+    steps:
+    - name: Get dates for last fortnight
+      shell: bash
+      run: |
+        # Get the current date
+        current_date=$(date +'%Y-%m-%d')
+
+        # Calculate previous fortnight
+        previous_date=$(date -d "$current_date -2 week" +'%Y-%m-%d')
+
+        echo "$previous_date..$current_date"
+        echo "last_fortnight=$previous_date..$current_date" >> "$GITHUB_ENV"
+
+    - name: Get issue metrics
+      uses: github/issue-metrics@v3
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        SEARCH_QUERY: 'repo:example-org/ps-tag-chronos is:pr created:${{ env.last_fortnight }} -author:app/renovate draft:false'
+        HIDE_TIME_TO_ANSWER: true
+        IGNORE_USERS: app/renovate
+
+    - name: Look for existing issue
+      id: last-issue
+      uses: micalevisk/last-issue-action@v2
+      with:
+        state: open
+        labels: ${{ env.issue-lookup-label }}
+
+    - name: Create issue
+      uses: peter-evans/create-issue-from-file@v5
+      with:
+        title: Fortnightly PR metrics report
+        token: ${{ secrets.GITHUB_TOKEN }}
+        content-filepath: ./issue_metrics.md
+        assignees: nicholas-bridges
+        issue-number: ${{ steps.last-issue.outputs.issue-number }}
+        labels: ${{ env.issue-lookup-label }}

@@ -1,0 +1,41 @@
+# dr-active-region-management.yaml
+# dr-active-region-management configuration
+
+name: Disaster Recovery Active Region Management
+
+run-name: Set ${{ inputs.active_region }} as the active region in ${{ inputs.environment }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      active_region:
+        description: "Active region"
+        required: true
+        default: "us-east-1"
+        type: choice
+        options:
+          - "us-east-1"
+          - "us-west-2"
+      environment:
+        description: "Environment to run the pipeline for"
+        required: true
+        default: "dev"
+        type: choice
+        options:
+          - "dev"
+          - "test"
+          - "stage"
+          - "prod"
+
+jobs:
+  call-dr-active-region-management:
+    name: DR
+    uses: example-org/shared-actions/.github/workflows/dr-active-region-management.yaml@dr-active-region-management-v1
+    with:
+      active_region: ${{ inputs.active_region }}
+      environment: ${{ inputs.environment }}
+      us_east_1_backend_config_path: "../environments/${{ inputs.environment }}/us-east-1/${{ inputs.environment }}.backend"
+      us_east_1_var_file_path: "../environments/${{ inputs.environment }}/us-east-1/${{ inputs.environment }}.tfvars"
+      us_west_2_backend_config_path: "../environments/${{ inputs.environment }}/us-west-2/${{ inputs.environment }}.backend"
+      us_west_2_var_file_path: "../environments/${{ inputs.environment }}/us-west-2/${{ inputs.environment }}.tfvars"
+      working_directory: "terraform/tag_core"

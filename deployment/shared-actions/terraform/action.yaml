@@ -1,0 +1,57 @@
+# action.yaml — action configuration
+
+# action.yaml — action configuration
+
+---
+name: 'Terraform'
+description: |
+  Perform Terraform actions in TAG Projects
+
+inputs:
+  version:
+    description: 'The semver of the action for automated tagging'
+    default: 1.0.1
+    required: false
+  apply:
+    description: 'Boolean to indicate running terraform apply'
+    required: false
+    default: 'false'
+  app_version:
+    description: 'Application version'
+    required: true
+  root_module_path:
+    description: 'Path to root module'
+    required: true
+  backend_config_path:
+    description: 'Path to backend config'
+    required: true
+  tfvars_path:
+    description: 'Path to tfvars'
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Terraform Init
+      shell: sh
+      working-directory: ${{ inputs.root_module_path }}
+      run: terraform init -backend-config=${{ inputs.backend_config_path }}
+
+    - name: Terraform Validate
+      shell: sh
+      working-directory: ${{ inputs.root_module_path }}
+      run: terraform validate
+
+    - name: Terraform Plan
+      shell: sh
+      working-directory: ${{ inputs.root_module_path }}
+      run: terraform plan --var-file=${{ inputs.tfvars_path }} -var app_version=${{ inputs.app_version }}
+
+    - name: Terraform Apply
+      shell: sh
+      working-directory: ${{ inputs.root_module_path }}
+      if: ${{ inputs.apply == 'true' }}
+      run: terraform apply --var-file=${{ inputs.tfvars_path }} -var app_version=${{ inputs.app_version }} -auto-approve

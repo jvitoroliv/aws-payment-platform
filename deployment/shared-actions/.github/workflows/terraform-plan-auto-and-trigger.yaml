@@ -1,0 +1,353 @@
+# terraform-plan-auto-and-trigger.yaml — terraform-plan-auto-and-trigger configuration
+
+# terraform-plan-auto-and-trigger.yaml — terraform-plan-auto-and-trigger configuration
+
+name: Terraform Plan Auto and Trigger
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: The semver of the workflow for automated tagging.
+        default: 1.0.0
+        type: string
+        required: false
+      region:
+        description: "Region to run terraform plan for (us-east-1, us-west-2, all_regions)"
+        type: string
+        required: false
+        default: "all_regions"
+      environment:
+        description: "Environment to run terraform plan for (dev, test, stage, prod, all_environments)"
+        type: string
+        required: false
+        default: "all_environments"
+      us_east_1_backend_config_path:
+        description: "Backend config path for us-east-1"
+        type: string
+        required: true
+      us_east_1_var_file_path:
+        description: "Var file path for us-east-1"
+        type: string
+        required: true
+      us_west_2_backend_config_path:
+        description: "Backend config path for us-west-2"
+        type: string
+        required: true
+      us_west_2_var_file_path:
+        description: "Var file path for us-west-2"
+        type: string
+        required: true
+      working_directory:
+        description: "Directory containing Terraform code main file"
+        type: string
+        required: true
+      terraform_variables:
+        description: "List of Terraform variables to pass as -var options (format: name=value\nname2=value2)"
+        type: string
+        required: false
+        default: ""
+      app_version_dev:
+        description: "App version for dev environment"
+        type: string
+        required: false
+        default: ""
+      app_version_test:
+        description: "App version for test environment"
+        type: string
+        required: false
+        default: ""
+      app_version_stage:
+        description: "App version for stage environment"
+        type: string
+        required: false
+        default: ""
+      app_version_prod:
+        description: "App version for prod environment"
+        type: string
+        required: false
+        default: ""
+jobs:
+  auto-plan:
+    name: Check Terraform Changes
+    runs-on: team-${{ inputs.environment == 'all_environments' && 'prod' || inputs.environment }}
+    if: ${{ github.event_name == 'pull_request' }}
+    outputs:
+      terraform_changed: ${{ steps.check-changes.outputs.terraform_changed }}
+      matrix_strategy: ${{ steps.check-changes.outputs.matrix_strategy }}
+      changed_tfvars_files: ${{ steps.check-changes.outputs.changed_tfvars_files }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check for Terraform Changes
+        id: check-changes
+        env:
+          BASE_BRANCH: ${{ github.event.pull_request.base.ref }}
+          HEAD_BRANCH: ${{ github.event.pull_request.head.ref }}
+        run: |
+          set -e
+          echo "Checking for Terraform file changes in PR..."
+          # Get changed terraform files directly
+          terraform_files=$(git diff --name-only "origin/$BASE_BRANCH...HEAD" | grep -E '\.(tf|tfvars)$' || echo "")
+
+          if [ -z "$terraform_files" ]; then
+            echo "No Terraform files changed"
+            echo "terraform_changed=false" >> $GITHUB_OUTPUT
+            echo "## Terraform Changes Check Results" >> $GITHUB_STEP_SUMMARY
+            echo "**No Terraform files were modified in this PR**" >> $GITHUB_STEP_SUMMARY
+            exit 0
+          fi
+
+          # If any .tf or .tfvars files changed, run for ALL environments and regions
+          echo "Found Terraform file changes - running plan for ALL environments and regions"
+          echo "terraform_changed=true" >> $GITHUB_OUTPUT
+          echo "matrix_strategy=all" >> $GITHUB_OUTPUT
+          echo "## Terraform Changes Check Results" >> $GITHUB_STEP_SUMMARY
+          echo "**Terraform files were modified - running plan for ALL environments and regions**" >> $GITHUB_STEP_SUMMARY
+          echo "**Strategy:** Matrix (all environments and regions)" >> $GITHUB_STEP_SUMMARY
+          echo "**Changed Terraform files:**" >> $GITHUB_STEP_SUMMARY
+          for file in $terraform_files; do
+            echo "- \`$file\`" >> $GITHUB_STEP_SUMMARY
+          done
+
+  triggered-plan:
+    name: Determine Terraform Plan Matrix
+    runs-on: team-${{ inputs.environment == 'all_environments' && 'prod' || inputs.environment }}
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    outputs:
+      has_plans: ${{ steps.build-matrix.outputs.has_plans }}
+    steps:
+      - name: Build Terraform Plan Matrix
+        id: build-matrix
+        env:
+          REGION: ${{ inputs.region }}
+          ENVIRONMENT: ${{ inputs.environment }}
+        run: |
+          set -e
+          echo "Building Terraform plan matrix for manual execution..."
+          echo "Environment: $ENVIRONMENT"
+          echo "Region: $REGION"
+
+          # Define environments and regions to iterate
+          environments="dev test stage prod"
+          regions="us-east-1 us-west-2"
+
+          # Determine which environments to include
+          env_list=""
+          if [ "$ENVIRONMENT" = "all_environments" ]; then
+            env_list="$environments"
+          else
+            env_list="$ENVIRONMENT"
+          fi
+
+          # Determine which regions to include
+          region_list=""
+          if [ "$REGION" = "all_regions" ]; then
+            region_list="$regions"
+          else
+            region_list="$REGION"
+          fi
+
+          # Check if we have valid combinations
+          if [ -n "$env_list" ] && [ -n "$region_list" ]; then
+            echo "has_plans=true" >> $GITHUB_OUTPUT
+            echo "## Terraform Plan Matrix Generated" >> $GITHUB_STEP_SUMMARY
+            echo "**Configuration:**" >> $GITHUB_STEP_SUMMARY
+            echo "- Environment(s): \`$ENVIRONMENT\` → ($env_list)" >> $GITHUB_STEP_SUMMARY
+            echo "- Region(s): \`$REGION\` → ($region_list)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "has_plans=false" >> $GITHUB_OUTPUT
+            echo "## No Terraform Plans Required" >> $GITHUB_STEP_SUMMARY
+            echo "**Result:** No valid environment/region combinations found." >> $GITHUB_STEP_SUMMARY
+          fi
+
+  build-matrix:
+    name: Build Terraform Matrix
+    runs-on: team-${{ inputs.environment == 'all_environments' && 'prod' || inputs.environment }}
+    needs: [auto-plan, triggered-plan]
+    if: ${{ always() && ((needs.auto-plan.outputs.terraform_changed == 'true') || (needs.triggered-plan.outputs.has_plans == 'true')) }}
+    outputs:
+      matrix_data: ${{ steps.generate-matrix.outputs.matrix_data }}
+    steps:
+      - name: Generate Matrix
+        id: generate-matrix
+        env:
+          REGION: ${{ inputs.region }}
+          ENVIRONMENT: ${{ inputs.environment }}
+          US_EAST_1_BACKEND_TEMPLATE: ${{ inputs.us_east_1_backend_config_path }}
+          US_EAST_1_VAR_TEMPLATE: ${{ inputs.us_east_1_var_file_path }}
+          US_WEST_2_BACKEND_TEMPLATE: ${{ inputs.us_west_2_backend_config_path }}
+          US_WEST_2_VAR_TEMPLATE: ${{ inputs.us_west_2_var_file_path }}
+          WORKING_DIRECTORY: ${{ inputs.working_directory }}
+          TERRAFORM_VARIABLES: ${{ inputs.terraform_variables }}
+          APP_VERSION_DEV: ${{ inputs.app_version_dev }}
+          APP_VERSION_TEST: ${{ inputs.app_version_test }}
+          APP_VERSION_STAGE: ${{ inputs.app_version_stage }}
+          APP_VERSION_PROD: ${{ inputs.app_version_prod }}
+          MATRIX_STRATEGY: ${{ needs.auto-plan.outputs.matrix_strategy }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -e
+          # Initialize matrix
+          matrix_json='{"include":['
+          first_item=true
+
+          # Function to add matrix entry
+          add_matrix_entry() {
+            local env=$1
+            local region=$2
+
+            # Replace template variables with actual environment
+            local backend_path var_path
+            if [ "$region" = "us-east-1" ]; then
+              backend_path="$US_EAST_1_BACKEND_TEMPLATE"
+              var_path="$US_EAST_1_VAR_TEMPLATE"
+            else
+              backend_path="$US_WEST_2_BACKEND_TEMPLATE"
+              var_path="$US_WEST_2_VAR_TEMPLATE"
+            fi
+
+            # Replace various template patterns
+            backend_path=$(echo "$backend_path" | sed "s/\${{ inputs.environment }}/$env/g" | sed "s/{env}/$env/g")
+            var_path=$(echo "$var_path" | sed "s/\${{ inputs.environment }}/$env/g" | sed "s/{env}/$env/g")
+            backend_path=$(echo "$backend_path" | sed "s/all_environments/$env/g" | sed "s/all_regions/$region/g")
+            var_path=$(echo "$var_path" | sed "s/all_environments/$env/g" | sed "s/all_regions/$region/g")
+
+            # Get app_version for this environment
+            local app_version_value=""
+            case "$env" in
+              "dev") app_version_value="$APP_VERSION_DEV" ;;
+              "test") app_version_value="$APP_VERSION_TEST" ;;
+              "stage") app_version_value="$APP_VERSION_STAGE" ;;
+              "prod") app_version_value="$APP_VERSION_PROD" ;;
+            esac
+
+            # Build terraform_variables with app_version prepended
+            local compiled_terraform_variables=""
+            if [ -n "$app_version_value" ] && [ "$app_version_value" != "" ]; then
+              compiled_terraform_variables="app_version=${app_version_value}"
+              if [ -n "$TERRAFORM_VARIABLES" ]; then
+                compiled_terraform_variables="${compiled_terraform_variables}\n${TERRAFORM_VARIABLES}"
+              fi
+            else
+              compiled_terraform_variables="$TERRAFORM_VARIABLES"
+            fi
+
+            # Add comma if not first item
+            if [ "$first_item" = false ]; then
+              matrix_json="${matrix_json},"
+            else
+              first_item=false
+            fi
+
+            # Escape values for JSON
+            local backend_escaped=$(echo "$backend_path" | sed 's/"/\\"/g')
+            local var_escaped=$(echo "$var_path" | sed 's/"/\\"/g')
+            local working_dir_escaped=$(echo "$WORKING_DIRECTORY" | sed 's/"/\\"/g')
+            local terraform_vars_escaped=$(echo "$compiled_terraform_variables" | sed 's/"/\\"/g')
+
+            # Add to matrix
+            matrix_json="${matrix_json}{"
+            matrix_json="${matrix_json}\"environment\":\"$env\","
+            matrix_json="${matrix_json}\"region\":\"$region\","
+            matrix_json="${matrix_json}\"backend_config_path\":\"$backend_escaped\","
+            matrix_json="${matrix_json}\"var_file_path\":\"$var_escaped\","
+            matrix_json="${matrix_json}\"working_directory\":\"$working_dir_escaped\","
+            matrix_json="${matrix_json}\"terraform_variables\":\"$terraform_vars_escaped\""
+            matrix_json="${matrix_json}}"
+          }
+
+          # Handle PR event with auto-plan
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            # For PR events, always run all combinations when terraform_changed=true
+            for env in dev test stage prod; do
+              add_matrix_entry "$env" "us-east-1"
+              add_matrix_entry "$env" "us-west-2"
+            done
+          else
+            # Handle workflow_dispatch event
+            environments="dev test stage prod"
+            regions="us-east-1 us-west-2"
+
+            # Determine which environments to include
+            env_list=""
+            if [ "$ENVIRONMENT" = "all_environments" ]; then
+              env_list="$environments"
+            else
+              env_list="$ENVIRONMENT"
+            fi
+
+            # Determine which regions to include
+            region_list=""
+            if [ "$REGION" = "all_regions" ]; then
+              region_list="$regions"
+            else
+              region_list="$REGION"
+            fi
+
+            # Build matrix based on selections
+            for env in $env_list; do
+              for reg in $region_list; do
+                add_matrix_entry "$env" "$reg"
+              done
+            done
+          fi
+
+          # Close JSON array
+          matrix_json="${matrix_json}]}"
+
+          echo "matrix_data=$matrix_json" >> $GITHUB_OUTPUT
+
+  terraform-plan-matrix:
+    needs: [auto-plan, triggered-plan, build-matrix]
+    if: ${{ always() && ((needs.auto-plan.outputs.terraform_changed == 'true') || (needs.triggered-plan.outputs.has_plans == 'true')) }}
+    strategy:
+      matrix: ${{ fromJson(needs.build-matrix.outputs.matrix_data) }}
+      fail-fast: false
+      max-parallel: 4
+    uses: example-org/shared-actions/.github/workflows/terraform-plan.yaml@terraform-plan-v1.0.1-pre.52
+    with:
+      backend_config_path: ${{ matrix.backend_config_path }}
+      var_file_path: ${{ matrix.var_file_path }}
+      working_directory: ${{ matrix.working_directory }}
+      terraform_variables: ${{ matrix.terraform_variables }}
+      environment: ${{ matrix.environment }}
+      region: ${{ matrix.region }}
+    secrets: inherit
+
+  comment-pr-results:
+    needs: [auto-plan, terraform-plan-matrix]
+    if: ${{ always() && github.event_name == 'pull_request' && needs.auto-plan.outputs.terraform_changed == 'true' }}
+    name: Comment PR with Results
+    runs-on: team-${{ inputs.environment == 'all_environments' && 'prod' || inputs.environment }}
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Comment PR with Job Summaries
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: prFiles } = await github.rest.pulls.listFiles({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+            });
+            const terraformFiles = prFiles
+              .filter(f => f.filename.match(/\.(tf|tfvars)$/))
+              .map(f => `• \`${f.filename}\``)
+              .join('\n') || '• No terraform files detected';
+            const status = '${{ needs.terraform-plan-matrix.result }}';
+            const statusIcon = {success: '✅', failure: '❌'}[status] || '⚠️';
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## 🔧 Terraform Auto Plan Results
+              **Changed Files:**
+              ${terraformFiles}
+              **Plan Status:** ${statusIcon} ${status.charAt(0).toUpperCase() + status.slice(1)}
+              📋 **[View Details](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})**
+              ---
+              *Auto-generated by Terraform Auto Plan workflow*`
+            });

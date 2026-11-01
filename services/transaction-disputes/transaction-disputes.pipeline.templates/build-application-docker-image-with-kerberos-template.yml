@@ -1,0 +1,161 @@
+# build-application-docker-image-with-kerberos-template.yml
+# build pipeline
+
+parameters:
+- name: JOB_NAME
+  type: string
+- name: PROJECT_PATH
+  type: string
+- name: DOCKER_IMAGE_NAME
+  type: string
+- name: CONTAINER_ARTIFACT_NAME
+  type: string
+- name: AGENT_POOL_NAME
+  type: string
+- name: DEPENDENT_JOB_NAME
+  type: string
+- name: KEYTAB_SECURE_FILE_NAME
+  type: string
+
+jobs:
+- job: '${{ parameters.JOB_NAME }}'
+  displayName: "Build application docker image"
+  dependsOn:  ${{ parameters.DEPENDENT_JOB_NAME }}
+  workspace:
+    clean: all
+  variables:
+    disable.coverage.autogenerate: 'true'
+    buildContainerName: '$(Build.BuildNumber)_build_container'
+    buildContainerSourceFolderName: 'src'
+    dockerExportFileName: 'image.tar'
+    dockerCompressedFileName: 'image.tar.gz'
+    Application.Version: $(Build.BuildNumber)
+  pool:
+    name:  ${{ parameters.AGENT_POOL_NAME }}
+
+  steps:
+  - checkout: self
+    clean: true
+    displayName: 'Checkout the source repository'
+
+  # This will use the matching variable above "Application.Version" to update the same json value in the specified target file(s)
+  - task: FileTransform@1
+    inputs:
+      folderPath: '$(System.DefaultWorkingDirectory)/${{ parameters.PROJECT_PATH }}'
+      fileType: json
+      targetFiles: appsettings.json
+    displayName: Update Application.Version in appsettings files
+    enabled: true
+    
+  - task: DownloadSecureFile@1
+    name: keytab
+    inputs:
+      secureFile: ${{ parameters.KEYTAB_SECURE_FILE_NAME }}
+
+  - bash: |
+      cp $(keytab.secureFilePath) $(System.DefaultWorkingDirectory)/${{ parameters.PROJECT_PATH }}/Docker/etc
+    displayName: Copying krb5 keytab
+
+  - task: Docker@0
+    inputs:
+      containerregistrytype: Container Registry
+      action: Run a Docker command
+      customCommand: image build -t $(buildContainerName) --label "$(Build.BuildNumber)" -f payment-service.pipeline.templates/BuildContainer_Dockerfile payment-service.pipeline.templates
+    displayName: Create build container
+    enabled: true
+
+  - task: Docker@0
+    inputs:
+      containerregistrytype: Container Registry
+      action: Run a Docker command
+      customCommand: run --privileged -id --name $(buildContainerName) $(buildContainerName)
+    displayName: Run the build container
+    enabled: true
+
+  - task: Docker@0
+    inputs:
+      containerregistrytype: Container Registry
+      action: Run a Docker command
+      customCommand: cp $(System.DefaultWorkingDirectory) $(buildContainerName):/$(buildContainerSourceFolderName)
+    displayName: Copy source code to build container
+    enabled: true
+
+  - task: Docker@0
+    inputs:
+      containerregistrytype: Container Registry
+      action: Run a Docker command
+      customCommand: 'exec --privileged -w /$(buildContainerSourceFolderName)/${{ parameters.PROJECT_PATH }} $(buildContainerName) dotnet publish -c Release -r linux-x64 --self-contained true -o /$(buildContainerSourceFolderName)/${{ parameters.PROJECT_PATH }}/publish'
+    displayName: Publish application ${{ parameters.PROJECT_PATH }}
+    enabled: true
+
+  - bash: |
+      sleep 30s
+    displayName: 'Sleep to ensure Docker service starts'
+    enabled: true
+
+  - task: Docker@0
+    inputs:
+      containerregistrytype: Container Registry
+      action: Run a Docker command
+      customCommand: exec --privileged -w /$(buildContainerSourceFolderName)/${{ parameters.PROJECT_PATH }} $(buildContainerName) docker image build -t ${{ parameters.DOCKER_IMAGE_NAME }}:$(Build.BuildNumber) --label "$(Build.BuildNumber)" .
+    displayName: Build application Docker image
+    enabled: true
+
+  - task: Docker@0
+    inputs:
+      containerregistrytype: Container Registry
+      action: Run a Docker command
+      customCommand: exec --privileged -w /$(buildContainerSourceFolderName)/${{ parameters.PROJECT_PATH }} $(buildContainerName) docker image save -o $(dockerExportFileName) ${{ parameters.DOCKER_IMAGE_NAME }}:$(Build.BuildNumber)
+    displayName: Export Docker image to file
+    enabled: true
+
+  - task: Docker@0
+    inputs:
+      containerregistrytype: Container Registry
+      action: Run a Docker command
+      customCommand: cp $(buildContainerName):/$(buildContainerSourceFolderName)/${{ parameters.PROJECT_PATH }}/$(dockerExportFileName) ${{ parameters.PROJECT_PATH }}/$(dockerExportFileName)
+    displayName: Copy Docker image file to agent host
+    enabled: true
+
+  - task: ArchiveFiles@1
+    inputs:
+      rootFolder: $(System.DefaultWorkingDirectory)/${{ parameters.PROJECT_PATH }}/$(dockerExportFileName)
+      includeRootFolder: false
+      tarCompression: 'gz'
+      archiveType: tar
+      archiveFile: $(System.DefaultWorkingDirectory)/${{ parameters.PROJECT_PATH }}/$(dockerCompressedFileName)
+    displayName: Compress Docker image file
+    enabled: true
+
+  - bash: |
+      rm $(System.DefaultWorkingDirectory)/${{ parameters.PROJECT_PATH }}/$(dockerExportFileName)
+    displayName: Remove uncompressed Docker image file
+    enabled: true
+
+  - task: PublishBuildArtifacts@1
+    inputs:
+      PathtoPublish: '$(System.DefaultWorkingDirectory)/${{ parameters.PROJECT_PATH }}/$(dockerCompressedFileName)'
+      ArtifactName: '${{ parameters.CONTAINER_ARTIFACT_NAME }}'
+    displayName: Publish Docker image file
+    enabled: true
+
+  - bash: |
+      rm $(System.DefaultWorkingDirectory)/${{ parameters.PROJECT_PATH }}/$(dockerCompressedFileName)
+    displayName: Remove compressed Docker image file
+    enabled: true
+
+  - task: Docker@0
+    condition: always()
+    inputs:
+      containerregistrytype: Container Registry
+      action: Run a Docker command
+      customCommand: stop $(buildContainerName)
+    displayName: Stop build container
+
+  - task: Docker@0
+    condition: always()
+    inputs:
+      containerregistrytype: Container Registry
+      action: Run a Docker command
+      customCommand: rm --force $(buildContainerName)
+    displayName: Remove build container

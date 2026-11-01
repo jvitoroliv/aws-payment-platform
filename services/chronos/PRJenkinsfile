@@ -1,0 +1,77 @@
+#!groovy
+
+properties([
+        [
+                $class       : 'DatadogJobProperty',
+                tagProperties: 'jenkins.job.duration,jenkins.job.status'
+        ]
+])
+
+node('dev') {
+    GL_DEBUG = 'linters_output'
+    GOPACKAGESPRINTGOLISTERRORS = 1
+
+    stage('Prep') {
+        SCM_CHECKOUT = checkout scm
+        env.VERSION = "${env.BRANCH_NAME}${env.BUILD_NUMBER}".toLowerCase()- 'pr' - '-' .take(6)
+        echo "Version: ${env.VERSION}"
+
+        buildName "${env.BUILD_NUMBER}) ${env.CHANGE_BRANCH}"
+        buildDescription "${env.CHANGE_BRANCH} => ${env.CHANGE_TARGET}. \nChange Author: ${env.CHANGE_AUTHOR}"
+    }
+
+    try {
+        withCredentials([usernamePassword(credentialsId: 'jenkins-default-GitHub-Token-example-org', passwordVariable: 'GITHUB_AUTH_TOKEN', usernameVariable: 'GITHUB_USERNAME')]) {
+            stage('Unit Tests') {
+                sh 'docker-compose -f docker/builder/docker-compose.yml build builder'
+                sh 'docker-compose -f docker/builder/docker-compose.yml run --rm builder bash -c "make test"'
+            }
+            stage('Deploy to Artifactory') {
+                sh "docker-compose -f ./docker/builder/docker-compose.yml run --rm builder bash -c './scripts/build_artifactory.sh ${env.VERSION}'"
+                withCredentials([usernamePassword(credentialsId: 'tag-devops-cloud-artifactory-creds', usernameVariable: 'USERNAME', passwordVariable: 'TOKEN')]) {
+                    docker.image('releases-docker.jfrog.io/jfrog/jfrog-cli-v2-jf').inside('-u root') {
+                        sh 'jf c add --url=https://registry.example.io/ --access-token=${TOKEN}'
+                        sh "jf rt u 'dist-files/*' tag-generic-nonprod-federated-us/chronos/${env.VERSION}/ --build-name ps-tag-chronos --build-number ${VERSION} --module lambdas"
+
+                        sh "jf rt build-publish ps-tag-chronos ${VERSION}"
+                    }
+                }
+            }
+        }
+
+        stage('Deploy to DEV Environment') {
+            build(job: "Deployment/ps-tag-chronos/${env.CHANGE_BRANCH}",
+                    propagate: true,
+                    wait: true,
+                    parameters: [
+                            string(name: 'VERSION', value: env.VERSION),
+                            string(name: 'ENVIRONMENT', value: 'dev'),
+                            string(name: 'runOneShots', value: 'no')
+                    ])
+        }
+
+        stage('Reset dev database') {
+            withCredentials([usernamePassword(credentialsId: 'ATLAS_DEV_ADMIN', passwordVariable: 'ATLAS_PASSWORD', usernameVariable: 'ATLAS_USER')]) {
+                docker.image('mongo:7.0').inside {
+                    dir('automated-tests/seed-data') {
+                        sh 'mongosh "mongodb+srv://test-cluster.example.mongodb.net/chronos" --username ${ATLAS_USER} --password ${ATLAS_PASSWORD} --eval "db.dropDatabase()"'
+                        sh 'mongosh "mongodb+srv://test-cluster.example.mongodb.net/chronos" --username ${ATLAS_USER} --password ${ATLAS_PASSWORD} data.js'
+                    }
+                }
+            }
+            echo 'Dev Database was reset'
+        }
+
+        stage('Automation') {
+            withEnv(['ENVIRONMENT=dev']) {
+                sh './automated-tests/docker/run_automation_aws.sh dev us-east-1'
+            }
+        }
+    } catch (Exception e) {
+        currentBuild.result = 'FAILURE'
+        println e.toString()
+    } finally {
+        sh 'docker-compose -f ./docker/builder/docker-compose.yml down'
+        notifyGoogle(currentBuild.result, 'Chronos Pull Request Build')
+    }
+}

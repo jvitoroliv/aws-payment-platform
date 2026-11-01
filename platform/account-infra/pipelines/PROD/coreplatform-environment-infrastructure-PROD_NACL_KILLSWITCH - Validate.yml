@@ -1,0 +1,47 @@
+# 'Allow scripts to access the OAuth token' was selected in pipeline.  Add the following YAML to any steps requiring access:
+#       env:
+#           MY_ACCESS_TOKEN: $(System.AccessToken)
+# Variable 'Environment' was defined in the Variables tab
+
+parameters:
+- name: Environment
+  default: 'PROD_NACL_KILLSWITCH'
+
+
+trigger:
+  branches:
+    include:
+    - refs/heads/master
+jobs:
+- job: Phase_1
+  displayName: Agent job 1
+  pool:
+    name: CpAWS-Prod
+  steps:
+  - checkout: self
+    clean: true
+    persistCredentials: True
+   # Prefixing git urls with the SYSTEM_ACCESSTOKEN
+  - template: ../templates/rewriteTerraformGitUrlsToIncludeToken.yml
+  - task: PowerShell@1
+    name: PowerShell5
+    displayName: 'Configure Git Client'
+    inputs:
+      scriptType: inlineScript
+      inlineScript: 'git config --global http.extraheader "AUTHORIZATION: bearer $env:SYSTEM_ACCESSTOKEN"'
+    env:
+      SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+  - task: PowerShell@1
+    name: PowerShell3
+    displayName: 'Validate in PROD_NACL_KILLSWITCH'
+    inputs:
+      scriptName: validate.ps1
+      arguments: ${{ parameters.Environment }}
+  - task: PowerShell@1
+    name: PowerShell6
+    displayName: Clean Git Client
+    condition: always()
+    inputs:
+      scriptType: inlineScript
+      inlineScript: 'git config --global --unset http.extraheader'
+...

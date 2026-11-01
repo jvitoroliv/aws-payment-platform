@@ -1,0 +1,21 @@
+# .mockery.yml — .mockery configuration
+
+with-expecter: true
+# Create mocks in the same directory as the interface
+dir: "{{.InterfaceDirRelative}}"
+mockname: "Mockery_{{.InterfaceName}}"
+outpkg: "{{.PackageName}}"
+filename: "mock_{{.InterfaceName}}.go"
+packages:
+    github.com/example-org/ps-tag-accounts-receivable/internal/common/adapters/mongodb:
+        interfaces:
+            MongoCollection:
+    github.com/example-org/ps-tag-accounts-receivable/internal/domain/funding/repo:
+        interfaces:
+            CompanyRepo:
+            FundingGroupRepo:
+            FundingGroupPositionRepo:
+    github.com/example-org/ps-tag-accounts-receivable/internal/domain/funding/service:
+        interfaces:
+            FundingGroupService:
+            FundingGroupPositionService:

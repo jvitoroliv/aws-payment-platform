@@ -1,0 +1,10 @@
+* @example-org/tag-leads
+/terraform/ @example-org/tag-devops-leads
+# DevOps
+/.github/workflows @example-org/tag-devops-leads
+/.github/linters/actionlint.yaml @example-org/tag-devops-leads
+/.github/linters/groovylintrc.json @example-org/tag-devops-leads
+/docker/*Dockerfile* @example-org/tag-devops-leads @example-org/tag-leads
+*Jenkinsfile @example-org/tag-devops-leads
+Makefile @example-org/tag-devops-leads @example-org/tag-leads
+

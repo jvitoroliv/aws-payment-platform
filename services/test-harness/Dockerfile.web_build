@@ -1,0 +1,19 @@
+# Base image pinned to specific version for reproducible builds.
+FROM registry.example.com/node:10-alpine
+
+# Explicit workdir avoids path ambiguity in COPY and RUN instructions.
+WORKDIR /app/web
+
+COPY web/package*.json .
+RUN npm install
+
+COPY web/ .
+
+RUN ./node_modules/.bin/gulp clean && \
+    ./node_modules/.bin/gulp build-archive
+
+RUN mkdir -p /app/out/web
+
+RUN cd /app && \
+    tar -xzf pkg/webresources.tgz -C /app/out/web && \
+    rm pkg/webresources.tgz

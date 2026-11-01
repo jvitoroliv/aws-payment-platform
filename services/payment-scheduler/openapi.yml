@@ -1,0 +1,414 @@
+# openapi.yml
+# openapi configuration
+
+openapi: 3.0.3
+info:
+  title: TAG Payment Scheduler Service
+  description: |-
+    This is up-to date documentation of the TAG Payment Scheduler Service REST API.
+  contact:
+    email: user@example-company.com
+  version: 1.0.0
+servers:
+  - url: https://test-www.platform.example.com/api/payment-service
+
+security:
+  - bearerAuth: []
+
+paths:
+  /payments:
+    post:
+      tags:
+        - Payments
+      summary: Create new scheduled payment
+      description: Schedule a new payment for processing
+      operationId: createPayment
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WritePaymentRequest'
+        required: true
+      responses:
+        '201':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentCreatedResponse'
+        '400':
+          description: Payload Validation Failure
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ValidationErrorResponse'
+                  - $ref: '#/components/schemas/APIErrorResponse'
+              examples:
+                validationError:
+                  summary: Validation Errors
+                  value:
+                    errors:
+                      - code: "PSV002"
+                        field: "amount.cents"
+                        message: "Value must be greater than zero"
+
+        '401':
+          description: "Unauthorized Request"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIErrorResponse'
+              examples:
+                unauthorizedError:
+                  summary: Unauthorized Error
+                  value:
+                    code: "PSA001"
+                    message: "The provided token is not valid"
+
+  /payments/{scheduled_payment_id}:
+    get:
+      tags:
+        - Payments
+      summary: Get Payment Information
+      description: Get Payment information from existing payment
+      operationId: getPaymentInfo
+      parameters:
+        - in: path
+          name: scheduled_payment_id
+          required: true
+          schema:
+            type: string
+
+      responses:
+        '200':
+          description: "Successful response"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentInfoResponse'
+        '401':
+          description: "Unauthorized Request"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIErrorResponse'
+              examples:
+                unauthorizedError:
+                  summary: Unauthorized Error
+                  value:
+                    code: "PSA001"
+                    message: "The provided token is not valid"
+        '404':
+          description: Payment not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIErrorResponse'
+    put:
+      tags:
+        - Payments
+      summary: Update an existing payment
+      description: Update an existing payment by payment identifier
+      operationId: updatePayment
+      parameters:
+        - in: path
+          name: scheduled_payment_id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        description: Update an existing payment in the store
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WritePaymentRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentCreatedResponse'
+        '400':
+          description: Payload Validation Failure
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ValidationErrorResponse'
+                  - $ref: '#/components/schemas/APIErrorResponse'
+              examples:
+                validationError:
+                  summary: Validation Error
+                  value:
+                    errors:
+                      - code: "PSV002"
+                        field: "amount.cents"
+                        message: "Value must be greater than zero"
+
+        '401':
+          description: "Unauthorized Request"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIErrorResponse'
+              examples:
+                unauthorizedError:
+                  summary: Unauthorized Error
+                  value:
+                    code: "PSA001"
+                    message: "The provided token is not valid"
+        '404':
+          description: "Payment not found"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIErrorResponse'
+
+    delete:
+      tags:
+        - Payments
+      summary: Cancel Payment
+      description: Cancel an existing payment
+      operationId: cancelPayment
+      parameters:
+        - in: path
+          name: scheduled_payment_id
+          required: true
+          schema:
+            type: string
+
+      responses:
+        '200':
+          description: Payment canceled
+        '400':
+          description: Payment cannot be canceled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIErrorResponse'
+        '401':
+          description: "Unauthorized Request"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIErrorResponse'
+              examples:
+                unauthorizedError:
+                  summary: Unauthorized Error
+                  value:
+                    code: "PSA001"
+                    message: "The provided token is not valid"
+        '404':
+          description: Payment not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIErrorResponse'
+
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+
+  schemas:
+    PaymentCreatedResponse:
+      type: object
+      properties:
+        scheduled_payment_id:
+          type: string
+          example: "0193f5c2-0e41-7b7d-83a5-9c7814438041"
+        status:
+          type: string
+          example: "PENDING"
+        payor:
+          $ref: '#/components/schemas/Payor'
+        amount:
+          $ref: '#/components/schemas/Amount'
+        company_number:
+          type: string
+          example: "4234678"
+        process_date:
+          type: string
+          example: "2024-12-24"
+
+    PaymentInfoResponse:
+      type: object
+      properties:
+        scheduled_payment_id:
+          type: string
+          example: "0193f5c2-0e41-7b7d-83a5-9c7814438041"
+        status:
+          type: string
+          example: "PENDING"
+          enum:
+            - PROCESSED
+            - PENDING
+            - IN_PROGRESS
+            - FAILED_TO_PROCESS
+        payor:
+          $ref: '#/components/schemas/Payor'
+        amount:
+          $ref: '#/components/schemas/Amount'
+        company_number:
+          type: string
+          example: "4234678"
+        process_date:
+          type: string
+          example: "2024-12-24"
+        reject_reason_description:
+          type: string
+          example: ""
+        return_reason_description:
+          type: string
+          example: ""
+
+    ValidationErrorResponse:
+      type: object
+      properties:
+        errors:
+          type:
+            array
+          items:
+            type: object
+            properties:
+              field:
+                type: string
+              message:
+                type: string
+              code:
+                type: string
+
+    # API error responses
+    APIErrorResponse:
+      type: object
+      properties:
+        code:
+          type: string
+          example: "PSS000"
+        message:
+          type: string
+        extra:
+          type: string
+      required:
+        - code
+        - message
+
+    ErrPaymentNotFound:
+      description: Scheduled payment not found
+      type: object
+      properties:
+        code:
+          type: string
+          example: "PSP001"
+        message:
+          type: string
+        extra:
+          type: string
+      required:
+        - code
+        - message
+    ErrPaymentAlreadyExists:
+      description: A scheduled payment with the same process date, company and amount already exists
+      type: object
+      properties:
+        code:
+          type: string
+          example: "PSP002"
+        message:
+          type: string
+        extra:
+          type: string
+      required:
+        - code
+        - message
+    ErrPaymentAlreadyProcessed:
+      description: The scheduled payment has already been sent to TAG for processing
+      type: object
+      properties:
+        code:
+          type: string
+          example: "PSP003"
+        message:
+          type: string
+        extra:
+          type: string
+      required:
+        - code
+        - message
+    ErrCompanyNumberMismatch:
+      description: The scheduled payment has already been sent to TAG for processing
+      type: object
+      properties:
+        code:
+          type: string
+          example: "PSP004"
+        message:
+          type: string
+        extra:
+          type: string
+      required:
+        - code
+        - message
+
+
+
+    WritePaymentRequest:
+      type: object
+      properties:
+        payor:
+          $ref: '#/components/schemas/Payor'
+        amount:
+          $ref: '#/components/schemas/Amount'
+        company_number:
+          type: string
+          minLength: 7
+          maxLength: 7
+          example: "0000000"
+        process_date:
+          type: string
+          example: "2022-05-05"
+          pattern: "YYYY-mm-dd"
+      required:
+        - payor
+        - amount
+        - company_number
+        - process_date
+
+    Payor:
+      type: object
+      properties:
+        account_number:
+          type: string
+          example: "000000000000"
+        routing_number:
+          type: string
+          example: "011000015"
+        type:
+          type: string
+          example: "CHECKING"
+          enum:
+            - CHECKING
+            - SAVINGS
+      required:
+        - account_number
+        - routing_number
+        - type
+
+    Amount:
+      type: object
+      properties:
+        cents:
+          type: integer
+          example: 2000
+          minimum: 1
+        currency:
+          type: string
+          example: "USD"
+      required:
+        - cents
+        - currency

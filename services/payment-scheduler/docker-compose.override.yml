@@ -1,0 +1,42 @@
+# docker-compose.override.yml
+# local development environment
+# Maintained by: Platform Engineering
+
+# docker-compose.override.yml — local development environment
+
+services:
+
+  payment-scheduler-api:
+    security_opt:
+      - "seccomp:unconfined"
+    cap_add:
+      - SYS_PTRACE
+    ports:
+      - "8000:7000"
+      - "49092:40000"
+    command:
+      - /debug/build/dlv
+      - --listen=:40000
+      - --log
+      - --headless=true
+      - --api-version=2
+      - --accept-multiclient
+      - exec
+      - /debug/build/payment-scheduler-api
+      - --continue
+
+  mongo-database:
+    volumes:
+      - ./automation/database:/jsfiles
+      - ./db_migrations/:/indices
+    working_dir: /jsfiles
+    # GitHub Environment — enables deployment protection rules and secrets scoping
+    environment:
+      MONGO_INITDB_DATABASE: payment_scheduler
+    ports:
+      - "27017:27017"
+
+volumes:
+  mongodata:
+    name: mongoschedulerdata
+    external: true

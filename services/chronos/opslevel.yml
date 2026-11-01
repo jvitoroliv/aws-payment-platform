@@ -1,0 +1,32 @@
+# opslevel.yml
+# opslevel configuration
+
+---
+version: 1
+service:
+  name: TAG Chronos Service
+  lifecycle: pre-alpha
+  tier: tier_4
+  product: TAG
+  owner: tag
+  system: tag
+  language: golang
+  framework: other
+  description: Replaces company cycling and aging functionality of CoreCard
+  aliases:
+    - example-org/ps-tag-chronos
+  tags:
+    - key: containerized
+      value: "true"
+    - key: pci
+      value: "false"
+    - key: scope
+      value: internal
+    - key: type
+      value: backend
+  repositories:
+  - name: example-org/ps-tag-chronos
+    path: "/"
+    provider: github
+  tools: []
+  dependencies: []

@@ -1,0 +1,42 @@
+Param(
+	[string]$type,
+	[string]$fi
+)
+
+Write-Host "FI = $fi"
+Write-Host "-------------------"
+
+# tests by server type
+
+$web      = @("DBSESSIONSTATE","MQ","APPFARM","DBSESSIONSTATE_NTX","AWSSECRETSMANAGER","TOKENIZER","SENTRY")
+$awsweb   = @("SESSIONDB_REDIS","APPFARM","TOKENIZER","SENTRY")
+$app      = @("FRAUD_GATEWAY","DBCOREPLATFORM","APPFARM","ARX","TAG","TAGTOKEN","TWILIO","PARTNER_REMIT","FTPUSERMANAGEMENT","DBTASKMANAGER_ENC","CARD_NETWORK_FULL","FAX_SERVICE","AUTHGATEWAY","CERBERUS","AWSSECRETSMANAGER","TOKENIZER","SENDGRID")
+$win      = @("APPFARM","TAG","TAGTOKEN","TWILIO","FAX_SERVICE","AUTHGATEWAY","AWSSECRETSMANAGER","TOKENIZER")
+$logqueue = @("INVOICEPARSER_REDIS","APPFARM","TAG","TAGTOKEN","TWILIO","FAX_SERVICE","AUTHGATEWAY")
+$bat      = @("CARD_MATCHING","FRAUD_GATEWAY","QUICKREMIT","PartnerECOM","CARD_NETWORK","DBCOREPLATFORM","MAILFARM_ENC","MQ","APPFARM","ARX","TAG","TAGTOKEN","PLATFORM-SERVICES","PLATFORM-SERVICESPRIMARY","PLATFORM-SERVICESSECONDARY","DBTASKMANAGER_ENC","CARD_NETWORK_FULL","FAX_SERVICE","AUTHGATEWAY","AWSSECRETSMANAGER","TOKENIZER","SENDGRID")
+$awsbat   = @("INVOICEPARSER_REDIS","FRAUD_GATEWAY","QUICKREMIT","CARD_NETWORK","DBCOREPLATFORM","APPFARM","ARX","TAG","TAGTOKEN","DBTASKMANAGER_ENC","CARD_NETWORK_FULL","FAX_SERVICE","AUTHGATEWAY","AWSSECRETSMANAGER","TOKENIZER","SENDGRID")
+$ftp      = @("TASKMANFTP")
+
+if ($fi -eq "FINSERV") {
+  $awsweb   += @("MQ")
+  $app      += @("MQ","CARD_MATCHING","QUICKREMIT","PartnerECOM","PARTNER_EU","PLATFORM-SERVICES","PLATFORM-SERVICESPRIMARY","PLATFORM-SERVICESSECONDARY")
+  $win      += @("MQ","PLATFORM-SERVICES","PLATFORM-SERVICESPRIMARY","PLATFORM-SERVICESSECONDARY")
+  $logqueue += @("MQ","PLATFORM-SERVICES","PLATFORM-SERVICESPRIMARY","PLATFORM-SERVICESSECONDARY")
+  $awsbat   += @("MQ","CARD_MATCHING","PartnerECOM","PARTNER_EU","PLATFORM-SERVICES","PLATFORM-SERVICESPRIMARY","PLATFORM-SERVICESSECONDARY")
+}
+
+$logpath = "C:\work\ACT"
+If (!(test-path $logpath))
+{
+	md $logpath
+}
+
+$ACTlist = $(Get-Variable -Name $type -ValueOnly)
+# run tests and output to log file
+foreach ($element in $ACTlist) {
+  Write-Host $element
+  C:\CoreService\ACT\ApplicationConnectivityTester.exe -t $element | Out-File -FilePath $logpath\ACT-$(Get-Date -Format "MM.dd.yyyy").log -Append
+}
+
+# cleanup old logs > 14 days old
+Get-ChildItem -Path $logpath -Recurse -Force | Where-Object { $_.Name -Match "^ACT-*" -and !$_.PSIsContainer -and $_.CreationTime -lt $(Get-Date).AddDays(-14) } | Remove-Item -Force

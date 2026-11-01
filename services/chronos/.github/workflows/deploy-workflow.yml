@@ -1,0 +1,314 @@
+# deploy-workflow.yml — deployment automation
+
+# deploy-workflow.yml — deployment automation
+
+name: Deploy
+run-name: Deploy ${{ inputs.application_version }} to ${{ inputs.environment }}-${{ inputs.region }} by @${{ github.actor }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Environment to deploy to
+        required: true
+        type: choice
+        default: 'dev'
+        options:
+          - dev
+          - test
+          - stage
+          - prod
+      region:
+        description: Region to deploy to
+        required: true
+        type: choice
+        default: 'us-east-1'
+        options:
+          - us-east-1
+          - us-west-2
+      application_version:
+        description: Application version to deploy (leave empty to maintain current version)
+        required: false
+        type: string
+        default: ''
+      active_region:
+        description: AWS Region to set as active
+        required: false
+        type: choice
+        default: 'current'
+        options:
+          - current
+          - us-east-1
+          - us-west-2
+      run_oneshots:
+        description: Run OneShotter after deployment
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  validate-inputs:
+    name: Validate Deployment Inputs
+    runs-on: ["tag-${{ inputs.environment }}", "self-hosted"]
+    outputs:
+      version: ${{ steps.validate.outputs.version }}
+      active_region: ${{ steps.validate.outputs.active_region }}
+      proceed: ${{ steps.validate.outputs.proceed }}
+    
+    steps:
+      - name: Validate and Process Inputs
+        id: validate
+        run: |
+          # Validate version for prod
+          if [ "${{ inputs.run_oneshots }}" == "true" ]; then
+            if [ "${{ needs.run-oneshots.result }}" == "success" ]; then
+              echo "✅ **OneShotter**: Triggered successfully" >> $GITHUB_STEP_SUMMARY
+            elif [ "${{ needs.run-oneshots.result }}" == "skipped" ]; then
+              echo "⏭️ **OneShotter**: Skipped" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "❌ **OneShotter**: Failed" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "⏭️ **OneShotter**: Not requested" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Next Steps" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ inputs.environment }}" == "dev" ]; then
+            echo "- Consider promoting to **test** environment" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ inputs.environment }}" == "test" ]; then
+            echo "- Consider promoting to **stage** environment" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ inputs.environment }}" == "stage" ]; then
+            echo "- Consider promoting to **prod** environment" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ inputs.environment }}" == "prod" ]; then
+            echo "- 🚀 **Production deployment complete!**" >> $GITHUB_STEP_SUMMARY
+            echo "- Monitor application health and metrics" >> $GITHUB_STEP_SUMMARY
+          fi [ "${{ inputs.environment }}" == "prod" ] && [ "${{ inputs.application_version }}" == "latest" ]; then
+            echo "::error::Specific commit version required for prod deploys."
+            exit 1
+          fi
+          
+          # Set version (empty means maintain current)
+          VERSION="${{ inputs.application_version }}"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          
+          # Process active_region
+          if [ "${{ inputs.active_region }}" == "current" ]; then
+            echo "active_region=" >> $GITHUB_OUTPUT
+          else
+            echo "active_region=${{ inputs.active_region }}" >> $GITHUB_OUTPUT
+          fi
+          
+          # Validate OneShotter requirements
+          if [ "${{ inputs.run_oneshots }}" == "true" ] && [ -z "$VERSION" ]; then
+            echo "::error::OneShotter requires VERSION to be specified."
+            exit 1
+          fi
+          
+          echo "proceed=true" >> $GITHUB_OUTPUT
+
+      - name: Display Deployment Plan
+        run: |
+          echo "## Deployment Plan" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Parameter | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Environment | ${{ inputs.environment }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Region | ${{ inputs.region }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Version | ${{ steps.validate.outputs.version || 'Keep current' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Active Region | ${{ steps.validate.outputs.active_region || 'Keep current' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| OneShotter | ${{ inputs.run_oneshots }} |" >> $GITHUB_STEP_SUMMARY
+
+  deploy-chronos:
+    name: Deploy Chronos
+    needs: [validate-inputs]
+    if: ${{ needs.validate-inputs.outputs.proceed == 'true' }}
+    runs-on: ["tag-${{ inputs.environment }}", "self-hosted"]
+    environment: ${{ inputs.environment }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Only run promotion and upload if VERSION is specified
+      - name: Promote Build to Prod
+        if: ${{ inputs.environment == 'prod' && needs.validate-inputs.outputs.version != '' }}
+        run: |
+          docker run --rm \
+            -e JFROG_CLI_OFFER_CONFIG=false \
+            releases-docker.jfrog.io/jfrog/jfrog-cli-v2-jf:latest \
+            bash -c "
+              jf c add --url=https://registry.example.io/ --access-token=${{ secrets.JFROG_ACCESS_TOKEN }}
+              jf rt build-promote ps-tag-chronos ${{ needs.validate-inputs.outputs.version }} tag-generic-prod-federated-us --status=promoted --copy
+            "
+
+      - name: Upload Lambda Artifacts to S3
+        if: ${{ needs.validate-inputs.outputs.version != '' }}
+        run: |
+          cd scripts
+          chmod +x place_lambdas_in_s3.sh
+          ./place_lambdas_in_s3.sh ${{ needs.validate-inputs.outputs.version }} ${{ inputs.environment }}
+        env:
+          ARTIFACTORY_ENDPOINT: https://registry.example.io/artifactory/tag-generic-${{ inputs.environment == 'prod' && 'prod' || 'nonprod' }}-federated-us
+          ARTIFACTORY_USER: ${{ secrets.ARTIFACTORY_USER }}
+          ARTIFACTORY_PASSWORD: ${{ secrets.ARTIFACTORY_PASSWORD }}
+
+      - name: Run Terraform Deployment
+        run: |
+          docker run --rm \
+            -v $(pwd):/workspace \
+            -w /workspace \
+            -e TF_VAR_environment=${{ inputs.environment }} \
+            -e TF_VAR_code_version=${{ needs.validate-inputs.outputs.version }} \
+            -e TF_VAR_active_region=${{ needs.validate-inputs.outputs.active_region }} \
+            -e AWS_ACCESS_KEY_ID \
+            -e AWS_SECRET_ACCESS_KEY \
+            -e AWS_SESSION_TOKEN \
+            --user $(id -u):$(id -g) \
+            registry.example.io/docker-prod/app/tag-utilities/tag-terraform:1.6.5 \
+            bash -c "
+              set -e
+              cd deployments/terraform/root-module
+              
+              # Initialize Terraform
+              terraform init -backend-config=../environments/${{ inputs.environment }}/${{ inputs.region }}/${{ inputs.environment }}.backend --reconfigure
+              
+              # Plan changes
+              echo '## Terraform Plan' >> \$GITHUB_STEP_SUMMARY
+              terraform plan -var-file=../environments/${{ inputs.environment }}/${{ inputs.region }}/${{ inputs.environment }}.tfvars -out=planfile | tee plan.log
+              
+              # Show plan summary
+              if grep 'Plan:' plan.log; then
+                PLAN_SUMMARY=\$(grep 'Plan:' plan.log | tail -1)
+                echo \"**\$PLAN_SUMMARY**\" >> \$GITHUB_STEP_SUMMARY
+              elif grep 'No changes' plan.log; then
+                echo '**No changes detected**' >> \$GITHUB_STEP_SUMMARY
+              fi
+              
+              # Apply changes
+              echo '## Terraform Apply' >> \$GITHUB_STEP_SUMMARY
+              terraform apply -auto-approve planfile | tee apply.log
+              
+              # Show apply summary
+              if grep 'Apply complete!' apply.log; then
+                APPLY_SUMMARY=\$(grep 'Apply complete!' apply.log | tail -1)
+                echo \"**\$APPLY_SUMMARY**\" >> \$GITHUB_STEP_SUMMARY
+              fi
+            "
+
+      - name: Get Terraform Outputs
+        id: terraform-outputs
+        run: |
+          docker run --rm \
+            -v $(pwd):/workspace \
+            -w /workspace/deployments/terraform/root-module \
+            -e AWS_ACCESS_KEY_ID \
+            -e AWS_SECRET_ACCESS_KEY \
+            -e AWS_SESSION_TOKEN \
+            registry.example.io/docker-prod/app/tag-utilities/tag-terraform:1.6.5 \
+            terraform output -json > terraform_outputs.json
+          
+          if [ -f terraform_outputs.json ] && [ -s terraform_outputs.json ]; then
+            API_URL=$(cat terraform_outputs.json | jq -r '.api_invoke_url.value // empty')
+            if [ -n "$API_URL" ]; then
+              echo "api_url=$API_URL" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+      - name: Generate Deployment Summary
+        run: |
+          echo "## ✅ Chronos Deployment Completed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Deployment Details" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment**: ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Region**: ${{ inputs.region }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version**: ${{ needs.validate-inputs.outputs.version || 'Current version maintained' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Active Region**: ${{ needs.validate-inputs.outputs.active_region || 'Current setting maintained' }}" >> $GITHUB_STEP_SUMMARY
+          if [ -n "${{ steps.terraform-outputs.outputs.api_url }}" ]; then
+            echo "- **API URL**: ${{ steps.terraform-outputs.outputs.api_url }}" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  run-oneshots:
+    name: Run OneShotter
+    needs: [validate-inputs, deploy-chronos]
+    if: ${{ inputs.run_oneshots == true && needs.deploy-chronos.result == 'success' }}
+    runs-on: ["tag-${{ inputs.environment }}", "self-hosted"]
+    
+    steps:
+      - name: Determine OneShotter Branch
+        id: oneshot-branch
+        run: |
+          VERSION="${{ needs.validate-inputs.outputs.version }}"
+          echo "Processing version: $VERSION"
+          
+          if [[ $(echo "$VERSION" | grep -o "-" | wc -l) -eq 3 ]]; then
+            BRANCH=$(echo "$VERSION" | cut -c 4-14)
+            echo "Extracted branch from version: $BRANCH"
+          else
+            BRANCH="master"
+            echo "Using default branch: master"
+          fi
+          
+          echo "branch=$BRANCH" >> $GITHUB_OUTPUT
+
+      - name: Trigger OneShotter
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            try {
+              console.log('Triggering OneShotter...');
+              const response = await github.rest.actions.createWorkflowDispatch({
+                owner: 'example-org',
+                repo: 'DBDataMigrationTool',
+                workflow_id: 'ps-tag-chronos.yml', // Ajuste conforme necessário
+                ref: 'master',
+                inputs: {
+                  ENVIRONMENT: '${{ inputs.environment }}',
+                  BRANCH: '${{ steps.oneshot-branch.outputs.branch }}'
+                }
+              });
+              
+              console.log('✅ OneShotter triggered successfully');
+              console.log(`Branch: ${{ steps.oneshot-branch.outputs.branch }}`);
+              console.log(`Environment: ${{ inputs.environment }}`);
+              
+            } catch (error) {
+              console.error('❌ Error triggering OneShotter:', error.message);
+              throw error;
+            }
+
+      - name: OneShotter Summary
+        run: |
+          echo "## OneShotter Execution" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ OneShotter has been triggered successfully" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment**: ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch**: ${{ steps.oneshot-branch.outputs.branch }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Repository**: example-org/DBDataMigrationTool" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Check the [DBDataMigrationTool repository](https://github.com/example-org/DBDataMigrationTool/actions) for execution status."
+
+  deployment-complete:
+    name: Deployment Complete
+    needs: [validate-inputs, deploy-chronos, run-oneshots]
+    if: always() && needs.deploy-chronos.result == 'success'
+    runs-on: ["tag-${{ inputs.environment }}", "self-hosted"]
+    
+    steps:
+      - name: Final Summary
+        run: |
+          echo "## 🎉 Deployment Pipeline Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ needs.deploy-chronos.result }}" == "success" ]; then
+            echo "✅ **Deployment**: Successful" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Deployment**: Failed" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if

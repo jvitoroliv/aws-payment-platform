@@ -1,0 +1,61 @@
+# template-steps-AWS_RunCustomExtract.yml
+# template-steps-AWS_RunCustomExtract configuration
+
+parameters:
+- name: fi
+  type: string
+  default: ''
+- name: env
+  type: string
+  default: ''
+
+steps:
+- checkout: none
+- task: DownloadPipelineArtifact@2
+  name: PullBuildInfoArtifact_Task
+  displayName: Download BuildInfo Artifact
+  inputs:
+    path: $(System.ArtifactsDirectory)\CustomExtractArtifacts
+- task: PowerShell@2
+  name: CheckFIEnvironment_Task
+  displayName: Check FI and Environment
+  inputs:
+    targetType: inline
+    script: |
+      $fi = "${{ parameters.fi }}"
+      $env = "${{ parameters.env }}"
+  
+      $params = Get-Content "$(System.ArtifactsDirectory)\CustomExtractArtifacts\CustomExtractParameters\CustomExtractParameters.json" | Out-String | ConvertFrom-Json
+      $paramFI = $params.FI
+      $paramEnv = $params.Environment
+   
+      Write-Host "Extract run FI is $paramFI in environment $paramEnv"
+      Write-Host "This is $FI $env"
+   
+      $rightFI = $FI.ToUpper() -eq $paramFI.ToUpper()
+      $rightEnv = $Env.ToUpper() -eq $paramEnv.ToUpper()
+   
+      if ($rightFI -and $rightEnv) {
+        Write-Host "Running Custom Extract here."
+        echo "##vso[task.setvariable variable=RunExtract]true"
+      }
+      else {
+        Write-Host "Not running here."
+        echo "##vso[task.setvariable variable=RunExtract]false"
+      }
+- task: PowerShell@2
+  name: RunCustomExtract_Task
+  displayName: Run Custom Extract
+  inputs:
+    targetType: filePath
+    filePath: '$(System.ArtifactsDirectory)/CustomExtractArtifacts/DeploymentScripts/AWS_CustomExtract_Run.ps1'
+    arguments: '$(System.ArtifactsDirectory)'
+  condition: and(succeeded(),eq(variables['RunExtract'],'true'))
+- task: PublishPipelineArtifact@1
+  name: PushResultsArtifact_Task
+  displayName: Push Results Artifact
+  inputs:
+    targetPath: '$(System.ArtifactsDirectory)\CustExt\Results.zip'
+    artifactName: Results
+  condition: and(succeeded(),eq(variables['RunExtract'],'true'))
+...

@@ -1,0 +1,41 @@
+# File: coreplatform-fi-infrastructure-ALL_PROD_TEMPLATE.yml
+# Purpose: A majority of the pipelines are identical, this template will be helpful in isolating 
+# and better encapsulating common functionality, as well as enforcing DRY (Don't repeat yourself)
+
+parameters:
+- name: EnvironmentName
+  default: 'QA'
+- name: AgentPoolName
+  type: string
+  values:
+  - CpAWS-Demo
+  - CpAWS-QA
+  - CpAWS-UAT
+  - CpAWS-qa-finserv
+  - CpAWS-UATDR
+  - CpAWS-Prod
+  default: CpAWS-QA
+
+jobs:
+- job: Phase_1
+  displayName: Validate
+  pool: ${{ parameters.AgentPoolName }}
+  steps:
+  - checkout: self
+    clean: true
+    submodules: true
+    persistCredentials: True
+   
+   # Prefixing git urls with the SYSTEM_ACCESSTOKEN
+  - template: rewriteTerraformGitUrlsToIncludeToken.yml
+  
+  # - script: |
+  #     export TF_IN_AUTOMATION=true
+  #     terraform state list
+  #   workingDirectory: env\${{parameters.EnvironmentName}}
+  #   condition: eq(variables['System.debug'], 'true')
+  #   displayName: 'terraform state list'
+
+  - powershell: |
+      .\validate.ps1 ${{ parameters.EnvironmentName }}
+    displayName: Validate Environment

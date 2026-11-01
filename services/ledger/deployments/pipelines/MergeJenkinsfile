@@ -1,0 +1,95 @@
+#!groovy
+
+properties(
+        [
+            ([
+                $class       : 'DatadogJobProperty',
+                tagProperties: "jenkins.job.duration,jenkins.job.status"
+            ])
+        ]
+)
+
+disableConcurrentBuilds()
+
+node("dev") {
+    def COMPOSE_COMMAND
+    String DOCKER_URL = "https://registry.example.io"
+    String credentialsId = 'jenkins-default-GitHub-Token-example-org'
+
+    stage('Prep') {
+        SCM_CHECKOUT = checkout scm
+
+        env.VERSION="RC-${SCM_CHECKOUT.GIT_COMMIT}"
+        buildName "${env.BUILD_NUMBER}) ${env.VERSION}"
+
+        COMPOSE_COMMAND = "docker-compose -f docker-compose.yml -f docker-compose.jenkins.yml -p ${env.VERSION}"
+        withDockerRegistry(credentialsId: 'tag-devops-cloud-artifactory-creds', url: DOCKER_URL) {
+            // Pull all images used by Docker Compose while using FINSERV Artifactory creds to bypass the Dockerhub pull limit
+            sh "${COMPOSE_COMMAND} pull"
+            sh "${COMPOSE_COMMAND} up -d builder"
+        }
+    }
+
+    try {
+        ansiColor('xterm') {
+            stage('Download Dependencies') {
+                docker.image("registry.example.com/golang:1.22.0").inside("-v ${env.WORKSPACE}/.mod:/go/pkg/mod -u root") {
+                    withCredentials([gitUsernamePassword(credentialsId: credentialsId, gitToolName: 'Default')]) {
+                        sh 'go mod download'
+                        sh 'go mod vendor'
+                    }
+                }
+            }
+
+            stage('Build Binary') {
+                withDockerRegistry(credentialsId: 'tag-devops-cloud-artifactory-creds', url: DOCKER_URL) {
+                    withCredentials([gitUsernamePassword(credentialsId: credentialsId, gitToolName: 'Default')]) {
+                        sh "${COMPOSE_COMMAND} exec -T builder bash -c 'make compile'"
+                    }
+                }
+            }
+
+            stage('Go Lint') {
+                sh "${COMPOSE_COMMAND} exec -T builder bash -c 'GOBIN=/go/bin make install-linter; make lint'"
+            }
+
+            stage("Docker Compose") {
+                // Use FINSERV Artifactory creds to bypass the Dockerhub pull limit
+                withDockerRegistry(credentialsId: 'tag-devops-cloud-artifactory-creds', url: DOCKER_URL) {
+                    sh "docker tag registry.example.io/docker-nonprod/app/tag-utilities/builder:1.21.3 builder:1.21.3"
+                    sh "DOCKER_REGISTRY='' ${COMPOSE_COMMAND} up --build -d"
+                }
+            }
+
+            stage('Go Unit Tests') {
+                sh "${COMPOSE_COMMAND} exec -T builder bash -c 'make unit-test'"
+            }
+
+            stage("Push Containers") {
+                pushContainerImage("ledger-producer", env.VERSION)
+            }
+
+            stage('Deploy to DEV Environment') {
+                build(job: "Deployment/ps-tag-ledger/main",
+                        propagate: true,
+                        wait: true,
+                        parameters: [
+                                string(name: 'VERSION', value: env.VERSION),
+                                string(name: 'REGION', value: 'us-east-1'),
+                                string(name: 'ENVIRONMENT', value: 'dev')
+                        ])
+            }
+
+        }
+    } catch (Exception e) {
+        currentBuild.result = 'FAILURE'
+        println e.toString()
+    } finally {
+        GString logFile = "${env.CHANGE_BRANCH}-${env.BUILD_NUMBER}.log"
+        sh "${COMPOSE_COMMAND} logs > ${logFile}"
+        zip archive: true, glob: "${logFile}", zipFile: "${logFile}.zip"
+
+        sh "${COMPOSE_COMMAND} down"
+        notifyGoogle(currentBuild.result, "Company Merge Build")
+    }
+}

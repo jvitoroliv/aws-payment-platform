@@ -1,0 +1,16 @@
+# .mockery.yml
+# .mockery configuration
+
+with-expecter: true
+# Create mocks in the same directory as the interface
+dir: "{{.InterfaceDirRelative}}"
+mockname: "Mockery_{{.InterfaceName}}"
+outpkg: "{{.PackageName}}"
+filename: "mock_{{.InterfaceName}}.go"
+packages:
+  github.com/example-org/ps-tag-chronos/pkg/repo:
+    interfaces:
+      UnpaidBalanceRepo:
+      AgingEventRepo:
+      BillableEntityRepo:
+      AmountDueRepo:

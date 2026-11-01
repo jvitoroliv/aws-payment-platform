@@ -1,0 +1,45 @@
+# PROJ-12962-call-test-workflow.yml — PROJ-12962-call-test-workflow configuration
+
+# PROJ-12962-call-test-workflow.yml — PROJ-12962-call-test-workflow configuration
+
+name: Test Terraform Discovery
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  call-terraform-discovery:
+    name: Call Terraform Discovery
+    uses: example-org/microservice-card-service/.github/workflows/terraform-directory-discovery.yml@terraform-directory-discovery-v1
+
+  process-results:
+    name: Process Discovery Results
+    runs-on: ubuntu-latest
+    needs: call-terraform-discovery
+    steps:
+      - name: Display Results
+        run: |
+          echo "=== Terraform Discovery Results ==="
+          echo "Terraform Changed: ${{ needs.call-terraform-discovery.outputs.terraform_changed }}"
+          echo "Changed Files: ${{ needs.call-terraform-discovery.outputs.changed_files }}"
+          echo "Terraform Directories: ${{ needs.call-terraform-discovery.outputs.terraform_directories }}"
+          echo ""
+          
+          if [ "${{ needs.call-terraform-discovery.outputs.terraform_changed }}" = "sim" ]; then
+            echo "Terraform files were modified in this PR"
+            echo "Files changed:"
+            echo "${{ needs.call-terraform-discovery.outputs.changed_files }}" | tr ' ' '\n'
+          else
+            echo "No Terraform files were modified in this PR"
+          fi
+
+      - name: Summary
+        run: |
+          echo "## Terraform Discovery Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Terraform Changed:** ${{ needs.call-terraform-discovery.outputs.terraform_changed }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Changed Files:** ${{ needs.call-terraform-discovery.outputs.changed_files }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Terraform Directories:** ${{ needs.call-terraform-discovery.outputs.terraform_directories }}" >> $GITHUB_STEP_SUMMARY

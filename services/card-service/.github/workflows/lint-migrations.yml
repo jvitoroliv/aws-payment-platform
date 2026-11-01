@@ -1,0 +1,42 @@
+# lint-migrations.yml
+# lint-migrations configuration
+# Maintained by: Platform Engineering
+
+# lint-migrations.yml — lint-migrations configuration
+
+name: Lint Migrations
+
+on: pull_request
+
+jobs:
+  lint_migrations:
+    runs-on: team-dev
+    container:
+      image: registry.example.com/ubuntu:22.04
+      volumes:
+        - ${{github.workspace}}:/go/src/github.com/example-org/microservice-card-service
+
+    steps:
+      - name: Install prerequisites
+        run: apt-get update && apt-get install -y git jq
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install squawk-cli
+        run: npm install -g squawk-cli@1.5.5
+        shell: bash
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Find modified migrations
+        id: modified-migrations
+        run: |
+          modified_migrations=$(git diff --name-only origin/$GITHUB_BASE_REF...origin/$GITHUB_HEAD_REF 'flyway/db/migrations/*.sql' | tr '\n' ' ')
+          echo "$modified_migrations"
+          echo "file_names=$modified_migrations --config=.github/.squawk.toml" >> $GITHUB_OUTPUT
+      - name: Lint Migrations
+        uses: sbdchd/squawk-action@v2
+        with:
+          files: ${{ steps.modified-migrations.outputs.file_names }}
+          access_token: ${{ secrets.GITHUB_TOKEN }}
+          fail-on-violations: 'true'

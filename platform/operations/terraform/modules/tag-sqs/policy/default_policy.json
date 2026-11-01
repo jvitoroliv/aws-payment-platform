@@ -1,0 +1,29 @@
+{
+    "Version":"2012-10-17",
+    "Id":"arn:aws:sqs:${aws_region}:${aws_account_number}:${environment}-${aws_region}-${name}/SQSDefaultPolicy",
+    "Statement":
+    [
+		{
+			"Effect":"Allow",
+			"Principal": {
+				"AWS": [
+					"${aws_account_number}"
+				],
+				"Service": [
+					"sqs.amazonaws.com",
+					"events.amazonaws.com",
+					"cloudwatch.amazonaws.com",
+					"sns.amazonaws.com"
+				]
+			},
+			"Action":
+			[
+				"SQS:ReceiveMessage",
+				"SQS:DeleteMessage",
+				"SQS:SendMessage",
+				"SQS:ChangeMessageVisibility"
+			],
+			"Resource":"arn:aws:sqs:${aws_region}:${aws_account_number}:${environment}-${aws_region}-${name}"
+		}
+    ]
+}

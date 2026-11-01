@@ -1,0 +1,109 @@
+#!groovy
+/* groovylint-disable NestedBlockDepth */
+
+properties(
+        [
+                parameters(
+                        [
+                                choice(name: 'ENVIRONMENT', choices: ['dev', 'test', 'stage', 'prod'],
+                                        description: 'Environment to deploy.'),
+                                choice(name: 'REGION', choices: ['us-east-1', 'us-west-2'], description: 'Region to deploy.'),
+                                string(name: 'VERSION', defaultValue: '', description: 'Exceptions Version')
+                        ]
+                ),
+                ([
+                        $class       : 'DatadogJobProperty',
+                        tagProperties: 'jenkins.job.duration,jenkins.job.status'
+                ])
+        ]
+)
+
+disableConcurrentBuilds()
+
+node("${params.ENVIRONMENT}") {
+    String artifactoryCredentialsId = 'tag-devops-cloud-artifactory-creds'
+    String DOCKER_URL = "https://registry.example.io"
+    withDockerRegistry(
+            credentialsId: artifactoryCredentialsId,
+            url: DOCKER_URL
+    ) {
+        stage('Prep') {
+            buildName "${env.BUILD_NUMBER}) ${params.ENVIRONMENT}"
+            buildDescription "${params.ENVIRONMENT} => ${params.VERSION}\n"
+            cleanWs()
+        }
+
+        ansiColor('xterm') {
+            try {
+                notifyGoogleNewDeploy()
+                checkout scm
+                def tfContainer = docker.image('registry.example.io/tag-docker-nonprod-virtual-us/hashicorp/terraform:1.6.5')
+                def gitCredentials = gitUsernamePassword(
+                        credentialsId: 'jenkins-default-GitHub-Token-example-org',
+                        gitToolName: 'Default'
+                )
+                stage('Validate image') {
+                    sh "docker manifest inspect registry.example.io/docker-nonprod/app/exception-producer:${params.VERSION}"
+
+                }
+                stage('Promote image') {
+                    if (params.ENVIRONMENT == 'prod') {
+                        withCredentials([usernamePassword(credentialsId: 'tag-devops-cloud-artifactory-creds',
+                                usernameVariable: 'USERNAME', passwordVariable: 'TOKEN')]) {
+                            docker.image("releases-docker.jfrog.io/jfrog/jfrog-cli-v2-jf").inside('-u root') {
+                                sh "jf c add --url=https://registry.example.io/ --access-token=${TOKEN}"
+                                sh "jf rt dpr tag/exception-producer tag-docker-nonprod-federated-us tag-docker-prod-federated-us --source-tag ${params.VERSION} --copy=true --target-tag ${params.VERSION}"
+                            }
+                        }
+                    } else {
+                        echo 'Not a prod deployment, skipping promotion'
+                    }
+                }
+                stage('Plan') {
+                    tfContainer.inside("-e TF_VAR_app_version=${params.VERSION} --entrypoint=''") {
+                        withCredentials([gitCredentials]) {
+                            dir('deployments/terraform/root-module') {
+                                sh "terraform init -backend-config=../environments/${params.ENVIRONMENT}/${params.REGION}/${params.ENVIRONMENT}.backend"
+                                sh "terraform plan --var-file=../environments/${params.ENVIRONMENT}/${params.REGION}/${params.ENVIRONMENT}.tfvars -out=${params.ENVIRONMENT}_${params.REGION}.planfile"
+                            }
+                        }
+                    }
+                }
+                userInputProceed(params.ENVIRONMENT)
+                stage('Apply') {
+                    tfContainer.inside("-e TF_VAR_app_version=${params.VERSION} --entrypoint=''") {
+                        withCredentials([gitCredentials]) {
+                            dir('deployments/terraform/root-module') {
+                                sh "terraform init -reconfigure -backend-config=../environments/${params.ENVIRONMENT}/${params.REGION}/${params.ENVIRONMENT}.backend"
+                                sh "terraform apply -auto-approve ${params.ENVIRONMENT}_${params.REGION}.planfile"
+                            }
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                currentBuild.result = 'FAILURE'
+                println e.toString()
+            } finally {
+                notifyGoogle(currentBuild.result, 'Non-posted-exceptions Deployment Build')
+            }
+        }
+    }
+}
+
+def userInputProceed(environment) {
+    def proceed = false
+    if (environment == 'dev' || environment == 'test') {
+        proceed = true
+    } else {
+        timeout(time: 1, unit: 'HOURS') {
+            proceed = input(
+                    id: "${environment}", message: 'Do you approve?', parameters: [
+                    [$class: 'BooleanParameterDefinition', defaultValue: true, description: '', name: 'Please Confirm']
+            ]
+            )
+        }
+        if (!proceed) {
+            error 'User decided not to proceed.'
+        }
+    }
+}

@@ -1,0 +1,6 @@
+# actionlint.yaml — actionlint configuration
+
+self-hosted-runner:
+  # Labels of self-hosted runner in array of string
+  labels:
+    - tag-dev

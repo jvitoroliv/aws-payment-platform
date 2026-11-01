@@ -1,0 +1,28 @@
+// #!groovy
+// properties(
+//     [
+//         parameters([
+//             string(defaultValue: '1.0.0', name: 'SEMANTIC_VERSION')
+//         ])
+// ])
+// disableConcurrentBuilds()
+
+// node("dev") {
+//     stage ('Test') {
+//         checkout scm
+//         buildName "${env.BUILD_NUMBER}) ${params.SEMANTIC_VERSION}"
+//     }
+
+//     stage ('Create Git Tag') {
+//         withCredentials([string(credentialsId: 'jenkins-default-GitHub-Token-example-org-secret-text', variable: 'GIT_API_TOKEN')]) {
+//             sh "git config user.name 'Jenkins'"
+//             sh "git config user.email 'user@example-company.com'"
+//             sh "git tag -a v${params.SEMANTIC_VERSION} -m 'Log version ${params.SEMANTIC_VERSION}'"
+//             sh "git push https://${GIT_API_TOKEN}@github.com/example-org/${determineRepoName()}.git v${params.SEMANTIC_VERSION}"
+//         }
+//     }
+// }
+
+// String determineRepoName() {
+//     return scm.getUserRemoteConfigs()[0].getUrl().tokenize('/').last().split("\\.")[0]
+// }

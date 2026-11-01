@@ -1,0 +1,203 @@
+# CorePlatformBuild Test.yaml — build pipeline
+
+# CorePlatformBuild Test.yaml — build pipeline
+
+name: $(date:yyyyMMdd).$(BuildId)-Test
+
+trigger: none
+pr: none  # This will disable automatic PR triggers   
+resources:
+  repositories:
+    - repository: coreplatform-AMIs
+      type: github
+      endpoint: example-org
+      name: example-org/coreplatform-AMIs
+variables:
+- group: CpAWS-PrimaryRegion-dotnet9
+- group: Octopus
+- name: Configuration
+  value: Release
+# Variable 'BuildAll' is defined in the UI because it is settable at queue time
+
+stages:
+- stage: CoreServiceBuildDotnet9Test
+  jobs:
+  - job: Build_CoreService_dotnet_9
+    displayName: Build CoreService dotnet 9
+    timeoutInMinutes: 90
+    pool:
+      name: CpAWS-Central-Test
+    steps:        
+    - checkout: self
+      clean: true
+
+    - template: template-steps-Roles_WorkFolder_VersionFile.yaml
+
+    - task: MSBuild@1
+      displayName: Build Transforms dotnet 9
+      inputs:
+        solution: Enc_BuildTransforms.proj
+        platform: Any CPU
+        configuration: $(Configuration)
+
+    - task: MSBuild@1
+      displayName: Build CorePlatform dotnet 9
+      inputs:
+        solution: Enc_BuildCorePlatform.proj
+        platform: Any CPU
+        configuration: $(Configuration)      
+
+    - task: PublishPipelineArtifact@1
+      displayName: Push General Artifacts dotnet 9
+      inputs:
+        targetPath: $(Build.SourcesDirectory)\Work\$(Configuration)\Artifacts\
+        artifact: General
+
+    - task: PublishPipelineArtifact@1
+      displayName: Push CoreService Artifacts dotnet 9
+      inputs:
+        targetPath: $(Build.SourcesDirectory)\Work\$(Configuration)\EncArtifacts\
+        artifact: CoreService
+
+    - task: PowerShell@2
+      displayName: Upload General Artifacts to S3 (dotnet 9)
+      inputs:
+        filePath: deployment/scripts/UploadArtifactsToS3.ps1
+        arguments: $(Build.SourcesDirectory)\Work\$(Configuration)\Artifacts\
+
+    - task: PowerShell@2
+      displayName: Upload CoreService Artifacts to S3 (dotnet 9)
+      inputs:
+        filePath: deployment/scripts/UploadArtifactsToS3.ps1
+        arguments: $(Build.SourcesDirectory)\Work\$(Configuration)\EncArtifacts\
+
+  - job: Build_DataUpdate_dotnet_9
+    displayName: Build DataUpdate dotnet 9
+    timeoutInMinutes: 90
+    pool:
+      name: CpAWS-Central-Test
+    steps:        
+    - checkout: self
+      clean: true
+
+    - template: template-steps-Roles_WorkFolder_VersionFile.yaml
+
+    - task: MSBuild@1
+      displayName: Build_DataUpdate_dotnet_9
+      inputs:
+        solution: Enc_BuildDataUpdate.proj
+        platform: Any CPU
+        configuration: $(Configuration)
+
+    - task: PowerShell@2
+      displayName: Upload DataUpdate Artifacts to S3
+      inputs:
+        filePath: deployment/scripts/UploadArtifactsToS3.ps1
+        arguments: $(Build.SourcesDirectory)\Work\$(Configuration)\DataArtifacts\
+
+    - task: PublishPipelineArtifact@1
+      displayName: Push DataUpdate Artifacts dotnet 9
+      inputs:
+        targetPath: $(Build.SourcesDirectory)\Work\$(Configuration)\DataArtifacts\
+        artifact: DataUpdate dotnet 9
+
+  - job: Build_TaskManagement_dotnet_9
+    displayName: Build TaskManagement dotnet 9
+    timeoutInMinutes: 90
+    pool:
+      name: CpAWS-Central-Test
+    steps:        
+    - checkout: self
+      clean: true
+
+    - template: template-steps-Roles_WorkFolder_VersionFile.yaml
+
+    - task: MSBuild@1
+      displayName: Build TaskManagement
+      inputs:
+        solution: Enc_BuildTaskManagement.proj
+        platform: Any CPU
+        configuration: $(Configuration)
+
+    - task: PowerShell@2
+      displayName: Upload TaskManagement Artifacts to S3
+      inputs:
+        filePath: deployment/scripts/UploadArtifactsToS3.ps1
+        arguments: $(Build.SourcesDirectory)\Work\$(Configuration)\JMArtifacts\
+
+    - task: PublishPipelineArtifact@1
+      displayName: Push TaskManagement Artifacts
+      inputs:
+        targetPath: $(Build.SourcesDirectory)\Work\$(Configuration)\JMArtifacts\
+        artifact: TaskManagement
+
+  - job: Build_Misc_dotnet_9
+    displayName: Build Misc dotnet 9
+    timeoutInMinutes: 90
+    pool:
+      name: CpAWS-Central-Test
+    steps:        
+    - checkout: self
+      clean: true
+
+    - template: template-steps-Roles_WorkFolder_VersionFile.yaml
+
+    - task: PowerShell@2
+      displayName: Get HelpMappings from S3
+      inputs:
+        filePath: deployment/scripts/AWS_GetHelpMappings.ps1
+        arguments: $(Build.SourcesDirectory)\Work\$(Configuration)\HelpMappings\
+
+    - task: PublishPipelineArtifact@1
+      displayName: Push HelpMappings Artifacts dotnet 9
+      inputs:
+        targetPath: $(Build.SourcesDirectory)\Work\$(Configuration)\HelpMappings\
+        artifact: HelpMappings
+
+    - task: PowerShell@2
+      displayName: Save BuildInfo to file
+      inputs:
+        targetType: inline
+        script: >
+          $buildinfo = @{ BuildNumber="$(Build.BuildNumber)"; SourceBranch="$(Channel)" }
+
+          $buildinfo # show to verify
+
+          $buildinfo | ConvertTo-Json | Out-File "$(Build.SourcesDirectory)\BuildInfo.json"
+
+    - task: PublishPipelineArtifact@1
+      displayName: Push BuildInfo file to artifacts
+      inputs:
+        targetPath: $(Build.SourcesDirectory)\BuildInfo.json
+        artifact: BuildInfo
+
+    - task: PublishPipelineArtifact@1
+      displayName: Push DeploymentScripts to artifacts
+      inputs:
+        targetPath: $(Build.SourcesDirectory)\deployment\scripts\
+        artifact: DeploymentScripts
+
+    - task: PublishPipelineArtifact@1
+      displayName: Push Nuget to artifacts
+      inputs:
+        targetPath: $(Build.SourcesDirectory)\src\Tools\Nuget\
+        artifact: NuGet
+
+    - task: PublishPipelineArtifact@1
+      displayName: Push Octo to artifacts
+      inputs:
+        targetPath: $(Build.SourcesDirectory)\src\Tools\Octopus\
+        artifact: Octo
+
+    - task: PublishPipelineArtifact@1
+      displayName: Push CoreServiceVersion to artifacts
+      inputs:
+        targetPath: $(Build.SourcesDirectory)\_CoreServiceVersion.txt
+        artifact: CoreServiceVersion
+
+    - task: PublishPipelineArtifact@1
+      displayName: Push Roles to artifacts
+      inputs:
+        targetPath: $(Build.SourcesDirectory)\_Roles.lst
+        artifact: Roles
+

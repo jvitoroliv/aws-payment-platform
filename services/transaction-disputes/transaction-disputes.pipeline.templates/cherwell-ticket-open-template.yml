@@ -1,0 +1,95 @@
+# cherwell-ticket-open-template.yml — cherwell-ticket-open-template configuration
+
+# cherwell-ticket-open-template.yml — cherwell-ticket-open-template configuration
+
+parameters:
+- name: DEPENDENT_JOB_NAME
+  type: string
+- name: VARIABLES_JOB_NAME
+  type: string
+- name: VARIABLES_TASK_NAME
+  type: string
+- name: PROPOSED_CHANGE_WINDOW_IN_MINUTES #Must be greater than 30
+  type: number
+- name: OPEN_CHERWELL_TICKET_JOB_NAME
+  type: string
+- name: SERVICE_CONNECTION_NAME
+  type: string
+- name: TICKET_REQUESTOR #LastName, FirstName
+  type: string
+- name: STANDARD_CHANGE_TEMPLATE_NAME
+  type: string
+- name: OWNED_BY_TEAM_NAME
+  type: string
+- name: OWNER_NAME #FirstName LastName
+  type: string
+- name: ADDITIONAL_DESCRIPTION_TEXT
+  type: string
+
+jobs:
+  - job: ${{ parameters.VARIABLES_JOB_NAME }}
+    displayName: "Generate Open Cherwell Ticket Values"
+    workspace:
+      clean: all
+    dependsOn: ${{ parameters.DEPENDENT_JOB_NAME }}
+    pool:
+      vmImage: windows-2019
+
+    steps:
+    - checkout: none
+
+    - task: PowerShell@2
+      name: ${{ parameters.VARIABLES_TASK_NAME }}
+      inputs:
+        targetType: 'inline'
+        script: |
+          $proposedStartDate = [System.TimeZoneInfo]::ConvertTimeBySystemTimeZoneId((Get-Date), 'Eastern Standard Time')
+          $proposedEndDate = $proposedStartDate.AddMinutes(${{ parameters.PROPOSED_CHANGE_WINDOW_IN_MINUTES }})
+          $proposedStartDateString = $proposedStartDate.ToString("yyyy-MM-ddTHH:mm:ss.fffK")
+          $proposedEndDateString = $proposedEndDate.ToString("yyyy-MM-ddTHH:mm:ss.fffK")
+          $externalReferenceNumber = [guid]::NewGuid()
+          Write-Host "##vso[task.setvariable variable=ProposedStartDate;isOutput=true]$proposedStartDateString"
+          Write-Host "##vso[task.setvariable variable=ProposedEndDate;isOutput=true]$proposedEndDateString"
+          Write-Host "##vso[task.setvariable variable=ExternalReferenceNumber;isOutput=true]$externalReferenceNumber"
+
+  - job: ${{ parameters.OPEN_CHERWELL_TICKET_JOB_NAME }}
+    displayName: "Open Cherwell Ticket"
+    pool: server
+    dependsOn: ${{ parameters.VARIABLES_JOB_NAME }}
+    condition: |
+      and(
+        succeeded(),
+        ne(dependencies.${{ parameters.VARIABLES_JOB_NAME }}.outputs['${{ parameters.VARIABLES_TASK_NAME }}.ProposedStartDate'], ''),
+        ne(dependencies.${{ parameters.VARIABLES_JOB_NAME }}.outputs['${{ parameters.VARIABLES_TASK_NAME }}.ProposedEndDate'], ''),
+        ne(dependencies.${{ parameters.VARIABLES_JOB_NAME }}.outputs['${{ parameters.VARIABLES_TASK_NAME }}.ExternalReferenceNumber'], '')
+      )
+    variables:
+      proposedStartDate: $[ dependencies.${{ parameters.VARIABLES_JOB_NAME }}.outputs['${{ parameters.VARIABLES_TASK_NAME }}.ProposedStartDate'] ]
+      proposedEndDate: $[ dependencies.${{ parameters.VARIABLES_JOB_NAME }}.outputs['${{ parameters.VARIABLES_TASK_NAME }}.ProposedEndDate'] ]
+      externalReferenceNumber: $[ dependencies.${{ parameters.VARIABLES_JOB_NAME }}.outputs['${{ parameters.VARIABLES_TASK_NAME }}.ExternalReferenceNumber'] ]
+    steps:
+    - task: InvokeRESTAPI@1
+      displayName: "Open Cherwell Ticket"
+      inputs:
+        connectionType: 'connectedServiceName'
+        serviceConnection: ${{ parameters.SERVICE_CONNECTION_NAME }}
+        method: 'POST'
+        body: |
+          {
+            "originatesFrom": "Azure Devops",
+            "action": "Create",
+            "requester": "${{ parameters.TICKET_REQUESTOR }}",
+            "businessServiceLine": "Payment Processing",
+            "standardChangeTemplateGroup": "Software Install Request",
+            "standardChangeTemplate": "${{ parameters.STANDARD_CHANGE_TEMPLATE_NAME }}",
+            "proposedStartDate": "$(proposedStartDate)",
+            "proposedEndDate": "$(proposedEndDate)",
+            "externalReferenceNumber": "$(externalReferenceNumber)",
+            "region": "[Office Locations]",
+            "ownedByTeam": "${{ parameters.OWNED_BY_TEAM_NAME }}",
+            "owner": "${{ parameters.OWNER_NAME }}",
+            "additionalDescriptionText": "ExternalReferenceNumber: $(externalReferenceNumber). ${{ parameters.ADDITIONAL_DESCRIPTION_TEXT }}",
+            "beginImplementation": "TRUE"
+          }
+        waitForCompletion: 'false'
+      enabled: true

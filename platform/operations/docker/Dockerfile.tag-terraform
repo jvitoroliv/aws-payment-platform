@@ -1,0 +1,103 @@
+################################
+# Builder/prep image
+################################
+
+# Base image pinned to specific version for reproducible builds.
+FROM python:3.12-slim-bullseye AS builder
+
+ARG BUILDARCH
+ARG GOVERSION=1.21.3
+ARG TFVERSION
+
+################################
+# Install necessary packages
+################################
+
+RUN apt-get update; apt-get install -y \
+    jq \
+    gnupg2 \
+    unzip \
+    wget
+
+################################
+# Prepare go
+################################
+
+COPY ./go${GOVERSION}.linux_SHA256SUMS ./
+RUN wget https://go.dev/dl/go${GOVERSION}.linux-${BUILDARCH}.tar.gz
+RUN sha256sum --ignore-missing -c go${GOVERSION}.linux_SHA256SUMS
+RUN tar -C /opt -xzf go${GOVERSION}.linux-${BUILDARCH}.tar.gz
+
+################################
+# Prepare Terraform
+################################
+
+# Process to verify Terraform binary is based on instructions from: https://developer.hashicorp.com/terraform/tutorials/cli/verify-archive
+
+# Import Hashicorp PGP key
+COPY ./hashicorp-pgp-key.asc ./
+RUN gpg --import hashicorp-pgp-key.asc
+
+# Generate throwaway GPG key and sign (trust) Hashicorp's PGP key
+RUN gpg --quick-generate-key --batch --passphrase "" tag-terraform-docker@devops.example.com
+RUN gpg --batch --yes --sign-key  "security@hashicorp.com"
+
+# Download terraform for linux and SHA256SUM/.sig files for verification
+RUN wget https://releases.hashicorp.com/terraform/${TFVERSION}/terraform_${TFVERSION}_linux_${BUILDARCH}.zip
+RUN wget https://releases.hashicorp.com/terraform/${TFVERSION}/terraform_${TFVERSION}_SHA256SUMS
+RUN wget https://releases.hashicorp.com/terraform/${TFVERSION}/terraform_${TFVERSION}_SHA256SUMS.sig
+
+# Verify SHA256SUM file using .sig file
+RUN gpg --verify terraform_${TFVERSION}_SHA256SUMS.sig terraform_${TFVERSION}_SHA256SUMS
+
+# Use SHA256SUM file to verify Terraform binary
+RUN sha256sum --ignore-missing -c terraform_${TFVERSION}_SHA256SUMS 
+
+# Unzip
+RUN unzip terraform_${TFVERSION}_linux_${BUILDARCH}.zip -d /opt/
+
+################################
+# Prepare pre-commit
+################################
+
+RUN wget -O /opt/pre-commit https://github.com/pre-commit/pre-commit/releases/download/v3.5.0/pre-commit-3.5.0.pyz
+RUN chmod +x /opt/pre-commit
+
+################################
+# Prepare tflint
+################################
+
+RUN wget https://github.com/terraform-linters/tflint/releases/download/v0.49.0/tflint_linux_${BUILDARCH}.zip
+RUN unzip tflint_linux_${BUILDARCH}.zip -d /opt
+RUN chmod +x /opt/tflint
+
+################################
+# Final image
+################################
+
+# Base image pinned to specific version for reproducible builds.
+FROM python:3.12-slim-bullseye AS final
+
+# Update and install security updates
+RUN apt-get update; apt-get -s dist-upgrade | grep "^Inst" | grep -i securi | awk -F " " {'print $2'} | xargs apt-get install -y
+
+# Install git
+RUN apt-get install git -y
+RUN git --version
+
+# Install go
+COPY --from=builder /opt/go /opt/go
+ENV PATH="/opt/go/bin:${PATH}"
+RUN go version
+
+# Install pre-commit
+COPY --from=builder /opt/pre-commit /usr/local/bin/
+RUN pre-commit --version
+
+# Install terraform
+COPY --from=builder /opt/terraform /usr/local/bin/
+RUN terraform --version
+
+# Install tflint
+COPY --from=builder /opt/tflint /usr/local/bin/
+RUN tflint --version

@@ -1,0 +1,26 @@
+# dev-us-east-1.yml — dev-us-east-1 configuration
+
+# dev-us-east-1.yml — dev-us-east-1 configuration
+
+# GitHub Environment — enables deployment protection rules and secrets scoping
+environment: dev
+awsRegion: us-east-1
+fulfillment:
+  schedulerIntervalSeconds: 10
+  queryMaxCards: 500
+  maxCompanyInParallel: 10
+  cardMaxGeneratingAttempts: 3
+logLevel: debug
+database:
+  dbName: "cards"
+  username: "card-service-dispatcher"
+  password: "{SECRET:dev-card-service-dispatcher-aurora-password}"
+  host: dev-service-aurora-global-cluster.global-xxxxxxxxxxxx.global.rds.amazonaws.com
+  port: 5432
+  connectTimeout: 5
+  clientTimeout: 2
+  sslMode: "require"
+tagClient:
+  url: https://api.internal.dev.platform.example.com
+  username: ServiceApiUser
+  password: "{SECRET:dev-card-service-tag-core-password}"

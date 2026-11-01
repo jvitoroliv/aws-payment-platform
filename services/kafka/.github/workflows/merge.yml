@@ -1,0 +1,14 @@
+# merge.yml
+# merge configuration
+
+name: Merge
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  test:
+    name: Go Tests
+    uses: ./.github/workflows/reusable-go-tests.yml

@@ -1,0 +1,23 @@
+# template-steps-Roles_WorkFolder_VersionFile.yaml
+# template-steps-Roles_WorkFolder_VersionFile configuration
+
+steps:
+- task: PowerShell@2
+  displayName: Get Roles from Selection File
+  inputs:
+    filePath: deployment/scripts/GetRoles.ps1
+
+- task: MSBuild@1
+  displayName: Delete Work Folder
+  inputs:
+    solution: Enc_DeleteWorkFolder.proj
+    platform: Any CPU
+    configuration: $(Configuration)
+
+- task: MSBuild@1
+  displayName: Create Version File
+  inputs:
+    solution: CreateVersionFile.proj
+    platform: Any CPU
+    configuration: $(Configuration)
+...

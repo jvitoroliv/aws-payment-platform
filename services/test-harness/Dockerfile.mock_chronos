@@ -1,0 +1,12 @@
+# Base image pinned to specific version for reproducible builds.
+FROM registry.example.com/alpine
+
+RUN mkdir -p /usr/local/share/ca-certificates
+COPY caadmin.proxy.example.com.pem /usr/local/share/ca-certificates/proxy-ca.crt
+RUN cat /usr/local/share/ca-certificates/proxy-ca.crt >> /etc/ssl/certs/ca-certificates.crt
+RUN apk update && apk add ca-certificates && rm -rf /var/cache/apk/*
+
+COPY mock-chronos /application
+COPY docker/run_application.sh /
+
+CMD "/run_application.sh"

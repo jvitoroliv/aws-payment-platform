@@ -1,0 +1,111 @@
+# CompileAWSTransforms.yaml
+# CompileAWSTransforms configuration
+
+trigger:
+  branches:
+    include:
+    - Major
+    - Prod
+    - Demo
+    - OnRamp
+  batch: True
+  paths:
+    include:
+    - '**/*.aocxdt'
+    - '**/*.config'
+    exclude:
+    - '**/packages.config'
+pr:
+  branches:
+    include:
+    - Major
+  paths:
+    include:
+    - '**/*.aocxdt'
+    - '**/*.config'
+    exclude:
+    - '**/packages.config'
+
+variables:
+- group: CpAWS-PrimaryRegion
+
+stages:              
+- stage: TransformsBuildAWSQA
+  dependsOn:
+  jobs:
+  - job: Test_Transforms_AWS_QA
+    displayName: Test Transforms AWS QA
+    timeoutInMinutes: 15
+    pool: 
+      name: CpAWS-qa-finserv
+    steps:
+        - checkout: self
+          clean: true
+          
+        - task: MSBuild@1
+          displayName: Test AWS Transforms QA
+          inputs:
+              solution: AWS_TestTransforms.proj
+              platform: Any CPU
+              configuration: Release
+              msbuildArguments: /p:Environment="QA"     
+              
+- stage: TransformsBuildAWSUAT
+  dependsOn:
+  jobs:
+  - job: Test_Transforms_AWS_UAT
+    displayName: Test Transforms AWS UAT
+    timeoutInMinutes: 15
+    pool: 
+      name: CpAWS-uat-finserv
+    steps:
+        - checkout: self
+          clean: true
+          
+        - task: MSBuild@1
+          displayName: Test AWS Transforms UAT
+          inputs:
+              solution: AWS_TestTransforms.proj
+              platform: Any CPU
+              configuration: Release
+              msbuildArguments: /p:Environment="UAT"                  
+
+- stage: TransformsBuildAWSPROD
+  dependsOn:
+  jobs:
+  - job: Test_Transforms_AWS_PROD
+    displayName: Test Transforms AWS PROD
+    timeoutInMinutes: 15
+    pool: 
+      name: CpAWS-prod-finserv
+    steps:
+        - checkout: self
+          clean: true
+          
+        - task: MSBuild@1
+          displayName: Test AWS Transforms PROD
+          inputs:
+              solution: AWS_TestTransforms.proj
+              platform: Any CPU
+              configuration: Release
+              msbuildArguments: /p:Environment="PROD"   
+ 
+- stage: TransformsBuildAWSDEMO
+  dependsOn:
+  jobs:
+  - job: Test_Transforms_AWS_DEMO
+    displayName: Test Transforms AWS DEMO
+    timeoutInMinutes: 15
+    pool: 
+      name: CpAWS-Demo-Finserv
+    steps:
+        - checkout: self
+          clean: true
+          
+        - task: MSBuild@1
+          displayName: Test AWS Transforms DEMO
+          inputs:
+              solution: AWS_TestTransforms.proj
+              platform: Any CPU
+              configuration: Release
+              msbuildArguments: /p:Environment="DEMO" 

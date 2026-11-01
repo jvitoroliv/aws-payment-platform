@@ -1,0 +1,184 @@
+[
+  {
+    "name": "${task_name}",
+    "image": "${container_image}",
+    "cpu": 0,
+    "systemControls": [],
+    "repositoryCredentials": {
+      "credentialsParameter": "${artifactory_secret_arn}"
+    },
+    "essential": true,
+    "portMappings": [
+      {
+        "protocol": "tcp",
+        "containerPort": ${container_port},
+        "hostPort": ${container_host_port}
+      }
+    ],
+    "logConfiguration": {
+      "logDriver": "awslogs",
+      "options": {
+        "awslogs-group": "${cloudwatch_log_group}",
+        "awslogs-region": "${aws_region}",
+        "awslogs-stream-prefix": "fargate"
+      }
+    },
+    "environment": [
+      {
+        "name": "ENVIRONMENT",
+        "value": "${environment}"
+      },
+      {
+        "name": "PAYMENT_SERVICE_API",
+        "value": "${api_discovery_endpoint}"
+      },
+      {
+        "name": "FALCONCTL_OPTS",
+        "value": "--cid=${endpoint_security_cid}"
+      }
+    ],
+    "volumesFrom": [],
+    "dependsOn": [
+      {
+        "containerName": "datadog",
+        "condition": "START"
+      },
+      {
+        "condition": "COMPLETE",
+        "containerName": "crowdstrike-falcon-init-container"
+      }
+    ],
+    "command": [
+      "sh",
+      "-c",
+      "exec /run_application.sh"
+    ],
+    "entryPoint": [
+      "/tmp/CrowdStrike/rootfs/lib64/ld-linux-x86-64.so.2",
+      "--library-path",
+      "/tmp/CrowdStrike/rootfs/lib64",
+      "/tmp/CrowdStrike/rootfs/bin/bash",
+      "/tmp/CrowdStrike/rootfs/entrypoint-ecs.sh"
+    ],
+    "mountPoints": [
+      {
+        "containerPath": "/tmp/CrowdStrike",
+        "readOnly": true,
+        "sourceVolume": "crowdstrike-falcon-volume"
+      },
+      {
+        "containerPath": "/tmp/CrowdStrike-private",
+        "readOnly": false,
+        "sourceVolume": "crowdstrike-private-${task_name}"
+      }
+    ],
+    "linuxParameters": {
+      "capabilities": {
+        "add": [
+          "SYS_PTRACE"
+        ],
+        "drop": []
+      }
+    }
+  },
+  {
+    "name": "datadog",
+    "image": "${datadog_image}",
+    "cpu": 0,
+    "mountPoints": [],
+    "systemControls": [],
+    "volumesFrom": [],
+    "repositoryCredentials": {
+      "credentialsParameter": "${artifactory_secret_arn}"
+    },
+    "essential": true,
+    "portMappings": [
+      {
+        "protocol": "udp",
+        "containerPort": 8125,
+        "hostPort": 8125
+      }
+    ],
+    "logConfiguration": {
+      "logDriver": "awslogs",
+      "options": {
+        "awslogs-group": "${datadog_log_group}",
+        "awslogs-region": "${aws_region}",
+        "awslogs-stream-prefix": "fargate"
+      }
+    },
+    "environment": [
+      {
+        "name": "ECS_FARGATE",
+        "value": "true"
+      },
+      {
+        "name": "ENVIRONMENT",
+        "value": "${environment}"
+      },
+      {
+        "name": "environment",
+        "value": "${environment}"
+      },
+      {
+        "name": "DD_DOGSTATSD_NON_LOCAL_TRAFFIC",
+        "value": "true"
+      },
+      {
+        "name": "DD_DOGSTATSD_TAGS",
+        "value": "[\"environment:${environment}\", \"fargate:true\"]"
+      },
+      {
+        "name": "DD_TAGS",
+        "value": "environment:${environment} fargate:true"
+      },
+      {
+        "name": "DD_API_KEY",
+        "value": "${datadog_api_key}"
+      },
+      {
+        "name": "DD_DOGSTATSD_TAG_CARDINALITY",
+        "value": "${datadog_tag_cardinality}"
+      }
+    ]
+  },
+  {
+    "name": "crowdstrike-falcon-init-container",
+    "image": "registry.example.io/crowdstrike-docker-prod-federated-us/falcon-container-sensor:${crowdstrike_sensor_version}",
+    "cpu": 0,
+    "environment": [],
+    "portMappings": [],
+    "systemControls": [],
+    "volumesFrom": [],
+    "repositoryCredentials": {
+      "credentialsParameter": "${artifactory_secret_arn}"
+    },
+    "essential": false,
+    "logConfiguration": {
+      "logDriver": "awslogs",
+      "options": {
+        "awslogs-group": "${crowdstrike_log_group}",
+        "awslogs-region": "${aws_region}",
+        "awslogs-stream-prefix" : "fargate"
+      }
+    },
+    "entryPoint": [
+      "/bin/bash",
+      "-c",
+      "chmod u+rwx /tmp/CrowdStrike && mkdir /tmp/CrowdStrike/rootfs && cp -r /bin /etc /lib64 /usr /entrypoint-ecs.sh /tmp/CrowdStrike/rootfs && chmod -R a=rX /tmp/CrowdStrike && chmod -R a=rwX /tmp/CrowdStrike-private-${task_name}"
+    ],
+    "mountPoints": [
+      {
+        "containerPath": "/tmp/CrowdStrike",
+        "readOnly": false,
+        "sourceVolume": "crowdstrike-falcon-volume"
+      },
+      {
+        "containerPath": "/tmp/CrowdStrike-private-${task_name}",
+        "readOnly": false,
+        "sourceVolume": "crowdstrike-private-${task_name}"
+      }
+    ],
+    "user": "0:0"
+  }
+]

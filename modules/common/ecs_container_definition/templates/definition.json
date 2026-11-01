@@ -1,0 +1,17 @@
+{
+  "name": "${name}",
+  "image": "${image}",
+  "cpu": ${cpu},
+  "memory": ${memory},
+  "environment": ${environment_vars},
+  "portMappings": ${port_mappings},
+  "logConfiguration": {
+    "logDriver": "${log_driver}",
+    "options": ${log_options}
+  },
+  "essential": true,
+  "mountPoints": ${mount_points},
+  "dockerLabels": {
+    "service": "${name}"
+  }
+}

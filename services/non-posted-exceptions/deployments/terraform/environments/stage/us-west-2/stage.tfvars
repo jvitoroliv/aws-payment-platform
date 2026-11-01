@@ -1,0 +1,13 @@
+aiven_project                = "stage"
+aiven_user                   = "tag_non_posted_exceptions"
+autoscaling_max_capacity     = 0
+autoscaling_min_capacity     = 0
+aws_vpc_id                   = "vpc-0example000000001"
+environment                  = "stage"
+region                       = "us-west-2"
+topic_cleanup_policy         = "compact,delete"
+topic_partition              = 4
+topic_replication            = 2
+topic_retention_time         = "63113904000" #2 years in milliseconds
+topic_termination_protection = true
+topic_title                  = "company.issuing.processing.NonPostedException"

@@ -1,0 +1,87 @@
+# cherwell-ticket-close-template.yml
+# cherwell-ticket-close-template configuration
+# Maintained by: Platform Engineering
+
+# cherwell-ticket-close-template.yml — cherwell-ticket-close-template configuration
+
+parameters:
+- name: DEPENDENT_JOB_NAME
+  type: string
+- name: VARIABLES_JOB_NAME
+  type: string
+- name: VARIABLES_TASK_NAME
+  type: string
+- name: ACTUAL_CHANGE_WINDOW_IN_MINUTES #Must be greater than 1 minute
+  type: number
+- name: CLOSE_CHERWELL_TICKET_JOB_NAME
+  type: string
+- name: OPEN_CHERWELL_TICKET_VARIABLES_JOB_NAME
+  type: string
+- name: OPEN_CHERWELL_TICKET_VARIABLES_TASK_NAME
+  type: string
+- name: SERVICE_CONNECTION_NAME
+  type: string
+- name: IMPLEMENTERS_NOTES
+  type: string
+
+jobs:
+  - job: ${{ parameters.VARIABLES_JOB_NAME }}
+    displayName: "Generate Close Cherwell Ticket Values"
+    workspace:
+      clean: all
+    dependsOn: ${{ parameters.DEPENDENT_JOB_NAME }}
+    condition: always()
+    pool:
+      vmImage: windows-2019
+
+    steps:
+    - checkout: none
+
+    - task: PowerShell@2
+      name: ${{ parameters.VARIABLES_TASK_NAME }}
+      inputs:
+        targetType: 'inline'
+        script: |
+          $actualStartDate = [System.TimeZoneInfo]::ConvertTimeBySystemTimeZoneId((Get-Date), 'Eastern Standard Time')
+          $actualEndDate = $actualStartDate.AddMinutes(${{ parameters.ACTUAL_CHANGE_WINDOW_IN_MINUTES }})
+          $actualStartDateString = $actualStartDate.ToString("yyyy-MM-ddTHH:mm:ss.fffK")
+          $actualEndDateString = $actualEndDate.ToString("yyyy-MM-ddTHH:mm:ss.fffK")
+          Write-Host "##vso[task.setvariable variable=ActualStartDate;isOutput=true]$actualStartDateString"
+          Write-Host "##vso[task.setvariable variable=ActualEndDate;isOutput=true]$actualEndDateString"
+
+  - job: ${{ parameters.CLOSE_CHERWELL_TICKET_JOB_NAME }}
+    displayName: "Close Cherwell Ticket"
+    pool: server
+    dependsOn:
+      - ${{ parameters.VARIABLES_JOB_NAME }}
+      - ${{ parameters.OPEN_CHERWELL_TICKET_VARIABLES_JOB_NAME }}
+    condition: |
+      and(
+        always(),
+        ne(dependencies.${{ parameters.VARIABLES_JOB_NAME }}.outputs['${{ parameters.VARIABLES_TASK_NAME }}.ActualStartDate'], ''),
+        ne(dependencies.${{ parameters.VARIABLES_JOB_NAME }}.outputs['${{ parameters.VARIABLES_TASK_NAME }}.ActualEndDate'], ''),
+        ne(dependencies.${{ parameters.OPEN_CHERWELL_TICKET_VARIABLES_JOB_NAME }}.outputs['${{ parameters.OPEN_CHERWELL_TICKET_VARIABLES_TASK_NAME }}.ExternalReferenceNumber'], '')
+      )
+    variables:
+      actualStartDate: $[ dependencies.${{ parameters.VARIABLES_JOB_NAME }}.outputs['${{ parameters.VARIABLES_TASK_NAME }}.ActualStartDate'] ]
+      actualEndDate: $[ dependencies.${{ parameters.VARIABLES_JOB_NAME }}.outputs['${{ parameters.VARIABLES_TASK_NAME }}.ActualEndDate'] ]
+      externalReferenceNumber: $[ dependencies.${{ parameters.OPEN_CHERWELL_TICKET_VARIABLES_JOB_NAME }}.outputs['${{ parameters.OPEN_CHERWELL_TICKET_VARIABLES_TASK_NAME }}.ExternalReferenceNumber'] ]
+    steps:
+    - task: InvokeRESTAPI@1
+      displayName: "Close Cherwell Ticket"
+      inputs:
+        connectionType: 'connectedServiceName'
+        serviceConnection: ${{ parameters.SERVICE_CONNECTION_NAME }}
+        method: 'POST'
+        body: |
+          {
+            "originatesFrom": "Azure Devops",
+            "action": "Close",
+            "externalReferenceNumber": "$(externalReferenceNumber)",
+            "actualStartDate": "$(actualStartDate)",
+            "actualEndDate": "$(actualEndDate)",
+            "implementersNotes": "ExternalReferenceNumber: $(externalReferenceNumber). ${{ parameters.IMPLEMENTERS_NOTES }}",
+            "finalDisposition": "Successful"
+          }
+        waitForCompletion: 'false'
+      enabled: true

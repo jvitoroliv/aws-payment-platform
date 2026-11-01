@@ -1,0 +1,31 @@
+# DataSync.yaml
+# data source lookups
+
+trigger: none
+
+schedules:
+- cron: '30 10 * * 1,2,3,4,5'
+  displayName: weekdays 10.30AM UTC
+  branches:
+    include:
+    - Major
+  always: true
+  
+jobs:
+- job: DataSync_Job
+  displayName: DataSync Job
+  pool:
+    name: CoreService-Sync
+    demands: msbuild
+  workspace:
+    clean: all    
+  steps:
+  - checkout: self
+  
+  - task: MSBuild@1
+    displayName: Build solution DataSync
+    inputs:
+      solution: DataSync.proj
+      msbuildVersion: 17.0
+      platform: Any CPU
+      configuration: Release

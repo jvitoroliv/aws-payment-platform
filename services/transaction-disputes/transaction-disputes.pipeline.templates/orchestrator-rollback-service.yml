@@ -1,0 +1,280 @@
+# =============================================================================
+# ORCHESTRATOR ROLLBACK SERVICE TEMPLATE
+# =============================================================================
+# This template performs rollback for a single service.
+# It downloads the rollback state from the original deployment and reverts
+# the ECS service to the previous Task Definition.
+# =============================================================================
+
+parameters:
+  - name: SERVICE_NAME
+    type: string
+  - name: CONDITION_VAR
+    type: string
+  - name: APPLICATION_FOLDER_NAME
+    type: string
+  - name: SOURCE_BUILD_ID
+    type: string
+
+jobs:
+  - job: Job_Rollback_${{ replace(replace(parameters.SERVICE_NAME, '.', '_'), '-', '_') }}
+    displayName: 'Rollback ${{ parameters.SERVICE_NAME }}'
+    condition: eq(variables['${{ parameters.CONDITION_VAR }}'], 'true')
+    pool:
+      name: $(AGENT_POOL)
+    variables:
+      buildContainerName: '$(Build.BuildNumber)_rollback_container'
+
+    steps:
+      - checkout: self
+        clean: true
+        displayName: 'Checkout source repository'
+
+      # =========================================================================
+      # STEP 1: Download rollback state from original deployment
+      # =========================================================================
+      - task: DownloadPipelineArtifact@2
+        displayName: 'Download rollback state from original deployment'
+        continueOnError: true
+        inputs:
+          source: 'specific'
+          project: '$(System.TeamProject)'
+          pipeline: 'production-orchestrator'
+          buildVersionToDownload: 'specific'
+          buildId: '${{ parameters.SOURCE_BUILD_ID }}'
+          artifactName: 'RollbackState-${{ parameters.SERVICE_NAME }}'
+          path: '$(System.ArtifactsDirectory)/rollback-state'
+
+      # =========================================================================
+      # STEP 2: Validate state artifact exists
+      # =========================================================================
+      - bash: |
+          set -e
+          echo "========================================"
+          echo "VALIDATING ROLLBACK STATE"
+          echo "========================================"
+
+          STATE_FILE="$(System.ArtifactsDirectory)/rollback-state/state.json"
+
+          if [ ! -f "$STATE_FILE" ]; then
+            echo "##[error]========================================" >&2
+            echo "##[error]ROLLBACK STATE NOT FOUND" >&2
+            echo "##[error]========================================" >&2
+            echo "##[error]Service: ${{ parameters.SERVICE_NAME }}" >&2
+            echo "##[error]Source Build ID: ${{ parameters.SOURCE_BUILD_ID }}" >&2
+            echo "##[error]" >&2
+            echo "##[error]This service was NOT deployed in the original execution." >&2
+            echo "##[error]Cannot rollback a service that was not deployed." >&2
+            echo "##[error]========================================" >&2
+            exit 1
+          fi
+
+          echo "Rollback state found:"
+          cat "$STATE_FILE"
+          echo ""
+          echo "Validation successful"
+          echo "========================================"
+        displayName: 'Validate rollback state exists'
+
+      # =========================================================================
+      # STEP 3: Parse rollback state and prepare variables
+      # =========================================================================
+      - bash: |
+          set -e
+          echo "========================================"
+          echo "PARSING ROLLBACK STATE"
+          echo "========================================"
+
+          STATE_FILE="$(System.ArtifactsDirectory)/rollback-state/state.json"
+
+          # Parse JSON
+          PREVIOUS_ARN=$(jq -r '.previous_task_definition_arn' "$STATE_FILE")
+          CLUSTER=$(jq -r '.cluster_name' "$STATE_FILE")
+          SERVICE=$(jq -r '.long_service_name' "$STATE_FILE")
+          REGION=$(jq -r '.region' "$STATE_FILE")
+          ENVIRONMENT=$(jq -r '.environment' "$STATE_FILE")
+          RELEASE_TAG=$(jq -r '.release_tag' "$STATE_FILE")
+
+          echo "Parsed state:"
+          echo "  Previous Task Definition ARN: $PREVIOUS_ARN"
+          echo "  Cluster: $CLUSTER"
+          echo "  Service: $SERVICE"
+          echo "  Region: $REGION"
+          echo "  Environment: $ENVIRONMENT"
+          echo "  Release Tag: $RELEASE_TAG"
+
+          # Validate previous ARN
+          if [ "$PREVIOUS_ARN" == "NONE" ] || [ "$PREVIOUS_ARN" == "null" ] || [ -z "$PREVIOUS_ARN" ]; then
+            echo "##[error]========================================" >&2
+            echo "##[error]NO PREVIOUS TASK DEFINITION" >&2
+            echo "##[error]========================================" >&2
+            echo "##[error]The original deployment was a NEW service deployment." >&2
+            echo "##[error]There is no previous state to rollback to." >&2
+            echo "##[error]" >&2
+            echo "##[error]To 'rollback' a new service, you must delete the service manually." >&2
+            echo "##[error]========================================" >&2
+            exit 1
+          fi
+
+          # Set variables for next steps
+          echo "##vso[task.setvariable variable=PREVIOUS_TASK_DEF_ARN]$PREVIOUS_ARN"
+          echo "##vso[task.setvariable variable=ECS_CLUSTER]$CLUSTER"
+          echo "##vso[task.setvariable variable=ECS_SERVICE]$SERVICE"
+          echo "##vso[task.setvariable variable=AWS_REGION_VAR]$REGION"
+          echo "##vso[task.setvariable variable=ROLLBACK_ENVIRONMENT]$ENVIRONMENT"
+          echo "##vso[task.setvariable variable=ROLLBACK_RELEASE_TAG]$RELEASE_TAG"
+
+          echo ""
+          echo "Variables set for rollback execution"
+          echo "========================================"
+        displayName: 'Parse rollback state'
+
+      # =========================================================================
+      # STEP 4: Execute ECS rollback
+      # =========================================================================
+      - bash: |
+          set -e
+          echo "========================================"
+          echo "EXECUTING ECS ROLLBACK"
+          echo "========================================"
+          echo "Service: ${{ parameters.SERVICE_NAME }}"
+          echo "Cluster: $(ECS_CLUSTER)"
+          echo "ECS Service: $(ECS_SERVICE)"
+          echo "Region: $(AWS_REGION_VAR)"
+          echo "Rolling back to: $(PREVIOUS_TASK_DEF_ARN)"
+          echo "========================================"
+          echo ""
+
+          # Update ECS service with previous Task Definition
+          echo "Updating ECS service..."
+          aws ecs update-service \
+            --cluster "$(ECS_CLUSTER)" \
+            --service "$(ECS_SERVICE)" \
+            --task-definition "$(PREVIOUS_TASK_DEF_ARN)" \
+            --force-new-deployment \
+            --region "$(AWS_REGION_VAR)"
+
+          echo ""
+          echo "ECS service update initiated"
+          echo "Waiting for service to stabilize..."
+
+          # Wait for service to become stable
+          aws ecs wait services-stable \
+            --cluster "$(ECS_CLUSTER)" \
+            --services "$(ECS_SERVICE)" \
+            --region "$(AWS_REGION_VAR)"
+
+          echo ""
+          echo "Service stabilized successfully"
+          echo "========================================"
+          echo "ROLLBACK COMPLETED"
+          echo "========================================"
+        displayName: 'Execute ECS rollback'
+        env:
+          AWS_REGION: $(AWS_REGION_VAR)
+
+      # =========================================================================
+      # STEP 5: Extract previous build tag for Terraform
+      # =========================================================================
+      - bash: |
+          set -e
+          echo "========================================"
+          echo "EXTRACTING BUILD TAG FROM TASK DEFINITION"
+          echo "========================================"
+
+          # Describe the Task Definition to get container image
+          TASK_DEF_JSON=$(aws ecs describe-task-definition \
+            --task-definition "$(PREVIOUS_TASK_DEF_ARN)" \
+            --region "$(AWS_REGION_VAR)" \
+            --query 'taskDefinition.containerDefinitions[0].image' \
+            --output text)
+
+          echo "Container image: $TASK_DEF_JSON"
+
+          # Extract tag from image URL
+          # Format: 123456.dkr.ecr.us-east-1.amazonaws.com/service:BUILD_TAG
+          PREVIOUS_TAG=$(echo "$TASK_DEF_JSON" | cut -d':' -f2)
+
+          echo "Extracted build tag: $PREVIOUS_TAG"
+          echo "##vso[task.setvariable variable=PREVIOUS_BUILD_TAG]$PREVIOUS_TAG"
+
+          echo "========================================"
+        displayName: 'Extract previous build tag'
+        env:
+          AWS_REGION: $(AWS_REGION_VAR)
+
+      # =========================================================================
+      # STEP 6: Build helper container for Terraform
+      # =========================================================================
+      - task: Docker@0
+        displayName: 'Build helper container'
+        inputs:
+          containerregistrytype: Container Registry
+          action: Run a Docker command
+          customCommand: 'image build -t $(buildContainerName):$(Build.BuildNumber) --label "$(Build.BuildNumber)" -f payment-service.pipeline.templates/BuildContainer_Dockerfile payment-service.pipeline.templates'
+
+      - task: Docker@0
+        displayName: 'Run helper container'
+        inputs:
+          containerregistrytype: Container Registry
+          action: Run a Docker command
+          customCommand: 'run --privileged -id --name $(buildContainerName) $(buildContainerName):$(Build.BuildNumber)'
+
+      - task: Docker@0
+        displayName: 'Copy source to helper container'
+        inputs:
+          containerregistrytype: Container Registry
+          action: Run a Docker command
+          customCommand: 'cp $(System.DefaultWorkingDirectory) $(buildContainerName):/src'
+
+      # =========================================================================
+      # STEP 7: Terraform refresh to sync state
+      # =========================================================================
+      - task: Docker@0
+        displayName: 'Terraform init'
+        inputs:
+          containerregistrytype: Container Registry
+          action: Run a Docker command
+          customCommand: 'exec --privileged -w /src/${{ parameters.APPLICATION_FOLDER_NAME }}/terraform $(buildContainerName) terraform init -backend-config=$(TERRAFORM_BACKEND)'
+
+      - task: Docker@0
+        displayName: 'Terraform workspace select'
+        inputs:
+          containerregistrytype: Container Registry
+          action: Run a Docker command
+          customCommand: 'exec --privileged -w /src/${{ parameters.APPLICATION_FOLDER_NAME }}/terraform $(buildContainerName) terraform workspace select $(TERRAFORM_WORKSPACE)'
+
+      - task: Docker@0
+        displayName: 'Terraform refresh (sync state after rollback)'
+        inputs:
+          containerregistrytype: Container Registry
+          action: Run a Docker command
+          customCommand: 'exec --privileged -w /src/${{ parameters.APPLICATION_FOLDER_NAME }}/terraform $(buildContainerName) terraform refresh -var variable_map={buildNumber:"\"$(PREVIOUS_BUILD_TAG)\""}'
+
+      - bash: |
+          echo "========================================"
+          echo "TERRAFORM STATE SYNCHRONIZED"
+          echo "========================================"
+          echo "Terraform state now reflects the rolled-back Task Definition"
+          echo "Next deployment will use correct baseline"
+          echo "========================================"
+        displayName: 'Terraform state sync summary'
+
+      # =========================================================================
+      # CLEANUP: Stop and remove helper container
+      # =========================================================================
+      - task: Docker@0
+        condition: always()
+        displayName: 'Stop helper container'
+        inputs:
+          containerregistrytype: Container Registry
+          action: Run a Docker command
+          customCommand: 'stop $(buildContainerName)'
+
+      - task: Docker@0
+        condition: always()
+        displayName: 'Remove helper container'
+        inputs:
+          containerregistrytype: Container Registry
+          action: Run a Docker command
+          customCommand: 'rm --force $(buildContainerName)'

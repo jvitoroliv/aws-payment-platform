@@ -1,0 +1,99 @@
+#!groovy
+/*
+MergeJenkinsfile
+
+This Jenkins pipeline is run when a PR is merged into master.
+
+A few things happen here:
+1. The latest release tag is retrieved from the repo
+2. A new release tag is created and pushed to the repo
+3. The tag-core infrastructure is deployed to the dev environment via DeployJenkinsfile
+
+ */
+
+properties(
+        [
+                disableConcurrentBuilds(),
+                parameters([
+                        string(defaultValue: 'latest', name: 'VERSION'),
+                ]),
+                ([
+                        $class       : 'DatadogJobProperty',
+                        tagProperties: 'jenkins.job.duration,jenkins.job.status'
+                ])
+        ]
+)
+
+node('dev') {
+    try {
+        stage('Prep') {
+            buildName "${env.BUILD_NUMBER} dev"
+            buildDescription "dev => ${params.VERSION}\n"
+            env.AWS_DEFAULT_REGION = 'us-east-1'
+
+            checkout([
+                    $class           : 'GitSCM',
+                    branches         : scm.branches,
+                    extensions       : [[$class: 'CloneOption', noTags: false, reference: '', shallow: false]],
+                    userRemoteConfigs: scm.userRemoteConfigs
+            ])
+        }
+
+        stage('Create Release Tag') {
+            // Retrieve the latest 'application' tag from the repo
+            String applicationTag = sh(returnStdout: true, script: "git tag --sort='-v:refname' | grep -o 'v0.*' | head -1 ").trim()
+            println("Current Application Version Tag = ${applicationTag}")
+            // Retrieve the latest 'release' tag from the repo
+            String latestReleaseTag = sh(returnStdout: true, script: "git tag --sort='-v:refname' | grep -o 'release-v0.*'| head -1 ").trim()
+            println("Current DevOps Release Tag = ${latestReleaseTag}")
+            // Many things could go wrong here, so wrapping everything in a try/catch
+            try {
+                // application version should be in the format 'v0.0.0'
+                def (appVersion, appRelease, appMinorVersion) = applicationTag.tokenize('.')
+                // latestReleaseTag should be in the format 'release-v0.0.0'
+                def (version, release, minorVersion) = latestReleaseTag.tokenize('.')
+                // We match the "major" version of tag core
+                if (appRelease.toInteger() > release.toInteger()) {
+                    println("Devops Major Release is behind the Application Version, Iterating to match")
+                    release = appRelease
+                    minorVersion = appMinorVersion
+                // else we iterate the current "minor" version
+                } else {
+                    println("DevOps Major Release matches Application Version, Iterating Minor Version")
+                    minorVersion = minorVersion.toInteger() + 1
+                    minorVersion = minorVersion.toString()
+                }
+                // releaseTag should be in the format 'release-v0.0.1'
+                String releaseTag = version + '.' + release + '.' + minorVersion
+                println("Pushing New Release Tag = ${releaseTag}")
+                sh("git tag -a -f '${releaseTag.trim()}' -m 'DevOps release ${releaseTag.trim()}'")
+
+                //push the new tag
+                withCredentials([string(credentialsId: 'jenkins-default-GitHub-Token-example-org-secret-text', variable: 'GIT_API_TOKEN')]) {
+                    sh("git push https://${GIT_API_TOKEN}@github.com/example-org/ps-tag-ops.git --tags ")
+                }
+            }
+            catch (Exception e) {
+                currentBuild.result = 'FAILURE'
+                println 'Failed to create release tag'
+                throw e
+            }
+        }
+
+        stage('Deploy to DEV Environment') {
+            build(job: 'Deployment/ps-tag-ops/master',
+                    propagate: true,
+                    wait: true,
+                    parameters: [
+                            string(name: 'VERSION', value: params.VERSION),
+                            string(name: 'runOneShots', value: 'yes'),
+                            string(name: 'ENVIRONMENT', value: 'dev')
+                    ])
+        }
+    } catch (Exception e) {
+        currentBuild.result = 'FAILURE'
+        println e.toString()
+    } finally {
+        notifyGoogle(currentBuild.result, 'OPS Merge Build')
+    }
+}

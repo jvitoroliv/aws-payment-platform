@@ -1,0 +1,57 @@
+---
+####################
+# Global RepositorySettings: https://github.com/probot/settings#usage
+# Global Settings: https://github.com/example-org/global-settings
+####################
+_extends: '.github:.github/settings.yml'
+
+repository:
+  name: ps-tag-log
+  description: TAG Log
+  topics: 
+  default_branch: master
+
+teams:
+  # * `pull` - can pull, but not push to or administer this repository.
+  # * `maintain` - Recommended for project managers who need to manage the repository without access to sensitive or
+  #                destructive actions.
+  # * `triage` - Recommended for contributors who need to proactively manage issues and pull requests without write
+  #              access.
+  - name: tag
+    permission: push
+  - name: tag-sdms
+    permission: admin
+
+branches:
+  # Branch Protection. Specify the branch name or set it as null to disable it
+  - name: master
+    protection:
+
+      # Required. Pull request review configurations. Set as null to disable it
+      required_pull_request_reviews:
+        # Approvals required to merge (1-6)
+        required_approving_review_count: 1
+        # Dismiss approved reviews automatically when a new commit is pushed. True/False
+        dismiss_stale_reviews: true
+        # Required review from code owners. True/False
+        require_code_owner_reviews: true
+        # Which users and teams dismiss pull request reviews.
+        dismissal_restrictions:
+          users: []
+          teams: []
+
+      # Required. All restrictions apply to administrators. True/False
+      enforce_admins: true
+
+      # Required. Require status checks to pass before merging.
+      required_status_checks:
+        # Required. If the branches need to be up-to-date before merging. True/False
+        strict: true
+        # Required. Required status checks to merge into the branch.
+        contexts:
+          - 'continuous-integration/jenkins/pr-merge'
+
+      # Required. Restrict who can push to this branch.
+      # Team and user restrictions are only available for organization-owned repositories.
+      # Set to null to disable.
+      restrictions: null

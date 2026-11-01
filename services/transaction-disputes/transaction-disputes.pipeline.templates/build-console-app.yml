@@ -1,0 +1,81 @@
+# build-console-app.yml
+# build pipeline
+
+parameters:
+- name: AGENT_POOL_NAME
+  type: string
+- name: APPLICATION_PROJECT_NAME
+  type: string
+- name: JOB_NAME
+  type: string
+- name: DEPENDENT_JOB_NAME
+  type: string
+- name: DOTNET_ENVIRONMENT
+  type: string
+
+jobs:
+- job: '${{ parameters.JOB_NAME }}'
+  displayName: "Build and run console app ${{ parameters.APPLICATION_PROJECT_NAME }}"
+  dependsOn: '${{ parameters.DEPENDENT_JOB_NAME }}'
+  workspace:
+    clean: all
+  variables:
+    buildContainerName: '$(Build.BuildNumber)_build_container'
+    buildContainerSourceFolderName: 'src'
+  pool:
+    name: '${{ parameters.AGENT_POOL_NAME }}'
+
+  steps:
+  - checkout: self
+    clean: true
+    displayName: 'Checkout the source repository'
+
+  - task: Docker@0
+    inputs:
+      containerregistrytype: Container Registry
+      action: Run a Docker command
+      customCommand: image build -t $(buildContainerName) --label "$(Build.BuildNumber)" -f payment-service.pipeline.templates/BuildContainer_Dockerfile payment-service.pipeline.templates
+    displayName: Create build container
+    enabled: true
+
+  - task: Docker@0
+    inputs:
+      containerregistrytype: Container Registry
+      action: Run a Docker command
+      customCommand: run --privileged -id -e DOTNET_ENVIRONMENT=${{ parameters.DOTNET_ENVIRONMENT }} --name $(buildContainerName) $(buildContainerName)
+    displayName: Run the build container
+    enabled: true
+
+  - task: Docker@0
+    inputs:
+      containerregistrytype: Container Registry
+      action: Run a Docker command
+      customCommand: cp $(System.DefaultWorkingDirectory) $(buildContainerName):/$(buildContainerSourceFolderName)
+    displayName: Copy source code to build container
+    enabled: true
+
+  - task: Docker@0
+    inputs:
+      containerregistrytype: Container Registry
+      action: Run a Docker command
+      customCommand: 'exec --privileged -w /$(buildContainerSourceFolderName)/${{ parameters.APPLICATION_PROJECT_NAME }} $(buildContainerName) dotnet publish -c Release -r linux-musl-x64 --self-contained true -p:PublishReadyToRun=true -o /$(buildContainerSourceFolderName)/${{ parameters.APPLICATION_PROJECT_NAME }}/publish'
+    displayName: Publish console application ${{ parameters.APPLICATION_PROJECT_NAME }}
+    enabled: true
+
+  - task: Docker@0
+    condition: always()
+    inputs:
+      containerregistrytype: Container Registry
+      action: Run a Docker command
+      customCommand: stop $(buildContainerName)
+    displayName: Stop build container
+    enabled: true
+
+  - task: Docker@0
+    condition: always()
+    inputs:
+      containerregistrytype: Container Registry
+      action: Run a Docker command
+      customCommand: rm --force $(buildContainerName)
+    displayName: Remove build container
+    enabled: true

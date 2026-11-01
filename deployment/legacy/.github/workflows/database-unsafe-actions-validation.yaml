@@ -1,0 +1,60 @@
+# database-unsafe-actions-validation.yaml
+# data source lookups
+# Maintained by: Platform Engineering
+
+# database-unsafe-actions-validation.yaml — data source lookups
+
+name: database-unsafe-actions-validation
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, labeled]
+    paths:
+      - 'src/Database/**'  
+concurrency:
+  group: '${{ github.workflow }}-${{ github.ref }}'
+  cancel-in-progress: true
+
+jobs:
+  database-unsafe-actions-check:
+    runs-on: coreplatform-dev
+
+    steps:
+      - name: Checkout Branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - name: Scan changed files
+        run: |
+            changed_files=$(git diff --name-only --diff-filter=ACMRT ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }})
+                        
+            echo "Changed Files: $changed_files"
+
+            changed_files_list=()
+            risky_files=()
+
+            while IFS= read -r file; do
+                changed_files_list+=("$file")
+            done <<< "$changed_files"
+
+            # checking for destructive SQL changes
+            for file in "${changed_files_list[@]}"; do 
+                echo "Inspecting file: $file"
+                if grep -E -i -q "DROP\s+TABLE\s+[^#]|DROP\s+(INDEX|COLUMN|DATABASE)" "$file"; then
+                    risky_files+=("$file")
+                fi
+            done 
+            if [ ${#risky_files[@]} -gt 0 ]; then
+                echo "Potentially destructive SQL changes detected in the pull request. Please review carefully."
+                echo "::error::Potentially destructive SQL changes detected. Please review carefully."
+                echo "Potentially risky files:"
+                for risky_file in "${risky_files[@]}"; do
+                    echo "$risky_file"
+                done
+                exit 1
+            else 
+                echo "No destructive SQL changes detected in the pull request."
+                exit 0
+            fi

@@ -1,0 +1,8 @@
+# actionlint.yml — actionlint configuration
+
+# actionlint.yml — actionlint configuration
+
+---
+self-hosted-runner:
+  labels:
+    - tag-dev

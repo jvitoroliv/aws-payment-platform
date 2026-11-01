@@ -1,0 +1,89 @@
+# merge-workflow.yml — merge-workflow configuration
+
+# merge-workflow.yml — merge-workflow configuration
+
+name: Merge Workflow
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-and-test:
+    runs-on: team-dev
+    steps:
+      - name: Set version
+        run: echo "VERSION=rc-${{ github.sha }}" >> $GITHUB_ENV
+
+      - name: Set compose command
+        run: echo "COMPOSE_COMMAND=docker-compose -f docker-compose.yml -p ${{ env.VERSION }}" >> $GITHUB_ENV
+
+      - name: Fix workspace file permissions
+        run: |
+          sudo chmod -R ugo+rwx ${GITHUB_WORKSPACE}
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Pull Docker Compose dependencies
+        run: |
+          ${{ env.COMPOSE_COMMAND }} pull --ignore-buildable
+          ${{ env.COMPOSE_COMMAND }} up -d builder
+
+      - name: Get Read Only Token
+        id: generate_token
+        uses: example-org/fabric-action-github-app-token@v1
+        with:
+          secret: ${{ secrets.FABRIC_SHARED_ACTION_READONLY_KEY }}
+
+      - name: Download dependencies
+        run: |
+          ${{ env.COMPOSE_COMMAND }} exec -T -e GH_TOKEN=${GH_TOKEN} builder sh -c 'git config --system url."https://noop:${GH_TOKEN}@github.com/example-org".insteadOf "https://github.com/example-org"'
+          ${{ env.COMPOSE_COMMAND }} exec -T -e GH_TOKEN=${GH_TOKEN} builder sh -c 'go mod download'
+        env:
+          GH_TOKEN: ${{ steps.generate_token.outputs.token }}
+
+      - name: Build binary
+        run: ${{ env.COMPOSE_COMMAND }} exec -T builder sh -c './build/compile.sh'
+
+      - name: Go Lint
+        run: ${{ env.COMPOSE_COMMAND }} exec -T builder sh -c 'GOBIN=/go/bin GOFLAGS=-buildvcs=false GOTOOLCHAIN=auto make check'
+
+      - name: Go Tests
+        run: ${{ env.COMPOSE_COMMAND }} exec -T builder sh -c 'CGO_ENABLED=1 GOFLAGS=-buildvcs=false make test'
+
+      - name: Docker Compose up
+        run: ${{ env.COMPOSE_COMMAND }} up --build -d
+
+      - name: Setup JFrog CLI
+        uses: example-org/shared-actions/fabric/artifactory-cli@v1
+        with:
+          artifactory_url: registry.example.io
+          jfrog_cli_version: 2.51.1
+          vault_namespace: applications
+          vault_secret: ci/kvv2/artifactory
+          vault_secret_key: token
+
+      - name: Push containers
+        uses: example-org/shared-actions/artifactory/docker-deploy@v1
+        with:
+          artifactory_url: registry.example.io
+          artifactory_namespace: tag-docker-nonprod-federated-us
+          image_name: tag/payment-scheduler-api
+          image_tag: ${{ env.VERSION }}
+
+      - name: Cleanup
+        if: always()
+        run: |
+          ${{ env.COMPOSE_COMMAND }} down
+          docker compose down && docker compose kill || true 
+          docker compose rm --volumes --stop --force
+
+  deploy-to-dev:
+    needs: build-and-test
+    uses: ./.github/workflows/deploy-workflow.yml
+    with:
+      ENVIRONMENT: dev
+      REGION: us-east-1
+      VERSION: rc-${{ github.sha }}

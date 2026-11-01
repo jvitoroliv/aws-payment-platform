@@ -1,0 +1,47 @@
+version = 1
+
+exclude_patterns = []
+
+test_patterns = [
+  "**/*_test.go",
+  "**/*_test.sh",
+  "**/test_*.py"
+]
+
+[[analyzers]]
+name = "secrets"
+enabled = true
+
+[[analyzers]]
+name = "docker"
+enabled = true
+
+  [analyzers.meta]
+  trusted_registries = [
+      "registry.example.com",
+      "registry.example.io",
+      "euartifactoryexample-org.jfrog.io",
+      "docker.io",
+      "hub.docker.com",
+      "ghcr.io"
+  ]
+
+[[analyzers]]
+name = "shell"
+enabled = true
+
+[[analyzers]]
+name = "go"
+enabled = true
+  [analyzers.meta]
+  import_root = "github.com/example-org/shared-actions"
+  dependencies_vendored = false
+  cgo_enabled = false
+
+[[analyzers]]
+name = "terraform"
+enabled = true
+
+[[analyzers]]
+name = "python"
+enabled = true

@@ -1,0 +1,217 @@
+# Variable 'ResultsFilename' defined in the Variables tab
+
+name: $(date:yyyyMMdd).$(BuildId)
+
+trigger: none
+
+variables:
+- name: Branch
+  value: $(BUILD.SOURCEBRANCHNAME)
+- name: Configuration
+  value: Debug
+
+stages:
+- stage: BuildBranch_Stage
+  jobs:
+  - job: Build_Job
+    displayName: Build Custom Extract Private Branch
+    pool:
+      name: CpAWS-Central
+    steps:
+    - checkout: self
+      clean: true
+      fetchTags: true
+    - task: PowerShell@1
+      name: CreateParametersFile_Task
+      displayName: Create Parameters File
+      inputs:
+        scriptName: deployment/scripts/AWS_CreateCustomExtractParameters.ps1
+    - task: MSBuild@1
+      name: DeleteWorkFolder_Task
+      displayName: Delete Work Folder
+      inputs:
+        solution: Enc_DeleteWorkFolder.proj
+        platform: Any CPU
+        configuration: $(Configuration)
+    - task: MSBuild@1
+      name: CreateVersionFile_Task
+      displayName: Create Version File
+      inputs:
+        solution: CreateVersionFile.proj
+        platform: Any CPU
+        configuration: $(Configuration)
+    - task: PowerShell@2
+      name: SaveBuildInfoFile_Task
+      displayName: Save BuildInfo File
+      inputs:
+        targetType: inline
+        script: |
+          $buildinfo = @{ BuildNumber="$(Build.BuildNumber)"; SourceBranch="$(Branch)" }
+          $buildinfo # show to verify
+          $buildinfo | ConvertTo-Json | Out-File "$(Build.SourcesDirectory)\BuildInfo.json"
+    - task: MSBuild@1
+      name: BuildTransforms_Task
+      displayName: Build Transforms
+      inputs:
+        solution: Enc_BuildTransforms.proj
+        platform: Any CPU
+        configuration: $(Configuration)
+    - task: MSBuild@1
+      name: BuildCustomExtract_Task
+      displayName: Build Custom Extract
+      inputs:
+        solution: AWS_BuildCustomExtract.proj
+        platform: Any CPU
+        configuration: $(Configuration)
+    - task: PublishPipelineArtifact@1
+      name: PushBuildInfoArtifact_Task
+      displayName: Push BuildInfo Artifact
+      inputs:
+        targetPath: $(Build.SourcesDirectory)\BuildInfo.json
+        artifactName: BuildInfo
+    - task: PublishPipelineArtifact@1
+      name: PushDeploymentScriptsArtifact_Task
+      displayName: Push DeploymentScripts Artifact
+      inputs:
+        targetPath: $(Build.SourcesDirectory)\deployment\scripts\
+        artifactName: DeploymentScripts
+    - task: PublishPipelineArtifact@1
+      name: PushCustomExtractParametersArtifact_Task
+      displayName: Push Custom Extract Parameters Artifact
+      inputs:
+        targetPath: $(Build.SourcesDirectory)\CustomExtractParameters\
+        artifactName: CustomExtractParameters
+    - task: PublishPipelineArtifact@1
+      name: PushCustomExtractArtifact_Task
+      displayName: Push CustomExtract Artifact
+      inputs:
+        targetPath: $(Build.SourcesDirectory)\Work\$(Configuration)\Artifacts\
+        artifactName: CustomExtract
+- stage: RunCustomExtract_Stage
+  jobs:
+  - job: Confirmation_Job
+    displayName: Confirmation
+    pool:
+      name: CpAWS-Central
+    steps:
+    - checkout: none
+    - task: DownloadPipelineArtifact@2
+      name: PullBuildInfoArtifact_Task
+      displayName: Download BuildInfo Artifact
+      inputs:
+        path: $(System.ArtifactsDirectory)\CustomExtractArtifacts
+    - task: PowerShell@2
+      name: BuildInfo_Task
+      displayName: View BuildInfo
+      inputs:
+        targetType: inline
+        script: |
+          $buildinfo = Get-Content "$(System.ArtifactsDirectory)\CustomExtractArtifacts\BuildInfo\BuildInfo.json" | Out-String | ConvertFrom-Json
+          $branch = $buildinfo.SourceBranch	# MJ-123456
+          $buildnumber = $buildinfo.BuildNumber	# 20210406.75993
+          write-host "Branch is ${branch} and BuildNumber is ${buildnumber}"    
+    - task: PowerShell@2
+      name: CustomExtractParameters_Task
+      displayName: View Custom Extract Parameters
+      inputs:
+        targetType: inline
+        script: |
+          $params = Get-Content "$(System.ArtifactsDirectory)\CustomExtractArtifacts\CustomExtractParameters\CustomExtractParameters.json" -raw | ConvertFrom-Json
+          $fi = $params.FI
+          $env = $params.Environment
+          $testname = $params.TestName
+          $resultsfilename = $params.ResultsFilename
+          
+          write-host "FI is $fi"
+          write-host "Environment is $env"
+          write-host "TestName is $testname"
+          write-host "ResultsFilename is $resultsfilename"
+  - job: RunCustomExtract_QA_Finserv_Job
+    displayName: Run Custom Extract QA Finserv
+    pool:
+      name: CpAWS-QA-Finserv
+    variables:
+      RunExtract: true
+    steps:
+    - template: template-steps-AWS_RunCustomExtract.yml
+      parameters:
+        fi: Finserv
+        env: QA
+  - job: RunCustomExtract_UAT_Finserv_Job
+    displayName: Run Custom Extract UAT Finserv
+    pool:
+      name: CpAWS-UAT-Finserv
+    variables:
+      RunExtract: true
+    steps:
+    - template: template-steps-AWS_RunCustomExtract.yml
+      parameters:
+        fi: Finserv
+        env: UAT
+  - job: RunCustomExtract_PROD_Finserv_Job
+    displayName: Run Custom Extract Prod Finserv
+    pool:
+      name: CpAWS-Prod-Finserv
+    variables:
+      RunExtract: true
+    steps:
+    - template: template-steps-AWS_RunCustomExtract.yml
+      parameters:
+        fi: Finserv
+        env: Prod
+  - job: RunCustomExtract_Demo_Finserv_Job
+    displayName: Run Custom Extract Demo Finserv
+    pool:
+      name: CpAWS-Demo-Finserv
+    variables:
+      RunExtract: true
+    steps:
+    - template: template-steps-AWS_RunCustomExtract.yml
+      parameters:
+        fi: Finserv
+        env: Demo
+  - job: RunCustomExtract_QA_ClientBank_Job
+    displayName: Run Custom Extract QA ClientBank
+    pool:
+      name: CpAWS-QA-ClientBank
+    variables:
+      RunExtract: true
+    steps:
+    - template: template-steps-AWS_RunCustomExtract.yml
+      parameters:
+        fi: ClientBank
+        env: QA
+  - job: RunCustomExtract_UAT_ClientBank_Job
+    displayName: Run Custom Extract UAT ClientBank
+    pool:
+      name: CpAWS-UAT-ClientBank
+    variables:
+      RunExtract: true
+    steps:
+    - template: template-steps-AWS_RunCustomExtract.yml
+      parameters:
+        fi: ClientBank
+        env: UAT
+  - job: RunCustomExtract_PROD_ClientBank_Job
+    displayName: Run Custom Extract Prod ClientBank
+    pool:
+      name: CpAWS-Prod-ClientBank
+    variables:
+      RunExtract: true
+    steps:
+    - template: template-steps-AWS_RunCustomExtract.yml
+      parameters:
+        fi: ClientBank
+        env: Prod
+  - job: RunCustomExtract_Demo_ClientBank_Job
+    displayName: Run Custom Extract Demo ClientBank
+    pool:
+      name: CpAWS-Demo-ClientBank
+    variables:
+      RunExtract: true
+    steps:
+    - template: template-steps-AWS_RunCustomExtract.yml
+      parameters:
+        fi: ClientBank
+        env: Demo
+...

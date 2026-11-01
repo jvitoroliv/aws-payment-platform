@@ -1,0 +1,99 @@
+#!groovy
+/* groovylint-disable NestedBlockDepth */
+
+properties(
+        [
+                ([
+                        $class       : 'DatadogJobProperty',
+                        tagProperties: 'jenkins.job.duration,jenkins.job.status'
+                ])
+        ]
+)
+
+disableConcurrentBuilds()
+
+node('dev') {
+    def COMPOSE_COMMAND
+    String DOCKER_URL = "https://registry.example.io"
+    String githubCredentialsId = 'jenkins-default-GitHub-Token-example-org'
+    String artifactoryCredentialsId = 'tag-devops-cloud-artifactory-creds'
+
+    withDockerRegistry(
+            credentialsId: artifactoryCredentialsId,
+            url: DOCKER_URL
+    ) {
+        stage('Prep') {
+            SCM_CHECKOUT = checkout scm
+
+            env.VERSION = "RC-${SCM_CHECKOUT.GIT_COMMIT}"
+
+            buildName "${env.BUILD_NUMBER}) ${env.VERSION}"
+            COMPOSE_COMMAND = "docker-compose -f docker-compose.yml -f docker-compose.jenkins.yml -p ${env.VERSION}"
+            sh "${COMPOSE_COMMAND} pull"
+            sh "${COMPOSE_COMMAND} up -d builder"
+        }
+
+        try {
+            ansiColor('xterm') {
+                stage('Generate Avro Models') {
+                    sh "${COMPOSE_COMMAND} exec -T builder bash -c 'GOBIN=/opt/go/bin make generate-avro-models'"
+                }
+
+                stage('Download Dependencies') {
+                    docker.image('registry.example.io/tag-docker-nonprod-virtual-us/golang:1.21.3').inside("-v ${env.WORKSPACE}/.mod:/go/pkg/mod -u root") {
+                        withCredentials([gitUsernamePassword(credentialsId: githubCredentialsId,
+                                gitToolName: 'Default')]) {
+                            sh 'go mod download'
+                            sh 'go mod vendor'
+                        }
+                    }
+                }
+
+                stage('Build Binary') {
+                    withCredentials([gitUsernamePassword(credentialsId: githubCredentialsId, gitToolName: 'Default')]) {
+                        sh "${COMPOSE_COMMAND} exec -T builder bash -c 'make compile'"
+                    }
+                }
+
+                stage('Docker Compose') {
+                    // Pass in DOCKER_REGISTRY variable to get an image
+                    // without the registry name to pass in pushContainerImage
+                    sh "DOCKER_REGISTRY='' ${COMPOSE_COMMAND} up --build -d"
+                }
+
+                stage('Go Lint') {
+                    sh "${COMPOSE_COMMAND} exec -T builder bash -c 'GOBIN=/opt/go/bin make install-linter; make lint'"
+                }
+
+                stage('Go Unit Tests') {
+                    sh "${COMPOSE_COMMAND} exec -T builder bash -c 'make unit-test'"
+                }
+
+                stage('Go Race Condition Check') {
+                    sh "${COMPOSE_COMMAND} exec -T builder bash -c 'make race'"
+                }
+
+                stage('Push Containers') {
+                    pushContainerImage('exception-producer', "${env.VERSION}")
+                }
+
+                stage('Deploy to DEV Environment') {
+                    build(job: "Deployment/ps-tag-non-posted-exceptions/main",
+                            propagate: true,
+                            wait: true,
+                            parameters: [
+                                    string(name: 'VERSION', value: env.VERSION),
+                                    string(name: 'REGION', value: 'us-east-1'),
+                                    string(name: 'ENVIRONMENT', value: 'dev')
+                            ])
+                }
+            }
+        } catch (Exception e) {
+            currentBuild.result = 'FAILURE'
+            println e.toString()
+            notifyGoogle(currentBuild.result, 'NPE Merge Build')
+        } finally {
+            sh "${COMPOSE_COMMAND} down"
+        }
+    }
+}

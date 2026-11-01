@@ -1,0 +1,313 @@
+# =============================================================================
+# ORCHESTRATOR DEPLOY SERVICE TEMPLATE
+# =============================================================================
+# This template is used by the orchestrator to deploy a single service.
+# It downloads the artifact from the individual pipeline and deploys to the target environment.
+
+parameters:
+  - name: SERVICE_NAME
+    type: string
+  - name: CONDITION_VAR
+    type: string
+  - name: PIPELINE_NAME
+    type: string
+  - name: DOCKER_IMAGE_NAME
+    type: string
+  - name: APPLICATION_FOLDER_NAME
+    type: string
+  - name: RUN_SMOKE_TESTS
+    type: boolean
+    default: true
+
+jobs:
+  - job: Job_Deploy_${{ replace(replace(parameters.SERVICE_NAME, '.', '_'), '-', '_') }}
+    displayName: 'Deploy ${{ parameters.SERVICE_NAME }}'
+    condition: eq(variables['${{ parameters.CONDITION_VAR }}'], 'true')
+    pool:
+      name: $(AGENT_POOL)
+    variables:
+      buildContainerName: '$(Build.BuildNumber)_deploy_container'
+      buildContainerDockerImageFolderName: 'dockerimage'
+      dockerExportFileName: 'image.tar'
+      dockerCompressedFileName: 'image.tar.gz'
+
+    steps:
+      - checkout: self
+        clean: true
+        displayName: 'Checkout source repository'
+
+      # =========================================================================
+      # STEP 1: Download artifact from individual pipeline
+      # =========================================================================
+      - task: DownloadPipelineArtifact@2
+        displayName: 'Download DockerImage artifact from ${{ parameters.PIPELINE_NAME }}'
+        retryCountOnTaskFailure: 3
+        inputs:
+          source: 'specific'
+          project: '$(System.TeamProject)'
+          pipeline: '${{ parameters.PIPELINE_NAME }}'
+          runVersion: 'latest'
+          tags: '$(RELEASE_TAG)'
+          artifact: 'DockerImage'
+          path: '$(System.ArtifactsDirectory)/DockerImage'
+
+      # =========================================================================
+      # STEP 2: Build helper container for AWS/Docker operations
+      # =========================================================================
+      - task: Docker@0
+        displayName: 'Build helper container'
+        inputs:
+          containerregistrytype: Container Registry
+          action: Run a Docker command
+          customCommand: 'image build -t $(buildContainerName):$(Build.BuildNumber) --label "$(Build.BuildNumber)" -f payment-service.pipeline.templates/BuildContainer_Dockerfile payment-service.pipeline.templates'
+
+      - task: Docker@0
+        displayName: 'Run helper container'
+        inputs:
+          containerregistrytype: Container Registry
+          action: Run a Docker command
+          customCommand: 'run --privileged -id --name $(buildContainerName) $(buildContainerName):$(Build.BuildNumber)'
+
+      # =========================================================================
+      # STEP 3: Copy source to container (needed for Terraform)
+      # =========================================================================
+      - task: Docker@0
+        displayName: 'Copy source to helper container'
+        inputs:
+          containerregistrytype: Container Registry
+          action: Run a Docker command
+          customCommand: 'cp $(System.DefaultWorkingDirectory) $(buildContainerName):/src'
+
+      # =========================================================================
+      # STEP 4: Ensure ECR repository exists
+      # =========================================================================
+      - task: Docker@0
+        displayName: 'Ensure ECR repository exists'
+        inputs:
+          containerregistrytype: Container Registry
+          action: Run a Docker command
+          customCommand: 'exec --privileged $(buildContainerName) /bin/sh -c "aws ecr describe-repositories --region $(AWS_REGION) --repository-names ${{ parameters.DOCKER_IMAGE_NAME }} || aws ecr create-repository --region $(AWS_REGION) --repository-name ${{ parameters.DOCKER_IMAGE_NAME }} --image-scanning-configuration scanOnPush=true"'
+
+      - bash: sleep 30s
+        displayName: 'Wait for Docker service'
+
+      # =========================================================================
+      # STEP 5: Load and push Docker image to ECR
+      # =========================================================================
+      - task: ExtractFiles@1
+        displayName: 'Decompress Docker image'
+        inputs:
+          archiveFilePatterns: '$(System.ArtifactsDirectory)/DockerImage/$(dockerCompressedFileName)'
+          destinationFolder: '$(System.ArtifactsDirectory)/DockerImage/'
+          cleanDestinationFolder: false
+
+      - bash: rm -f $(System.ArtifactsDirectory)/DockerImage/$(dockerCompressedFileName)
+        displayName: 'Remove compressed file'
+
+      - task: Docker@0
+        displayName: 'Copy Docker image to helper container'
+        inputs:
+          containerregistrytype: Container Registry
+          action: Run a Docker command
+          customCommand: 'cp $(System.ArtifactsDirectory)/DockerImage $(buildContainerName):/$(buildContainerDockerImageFolderName)'
+
+      - bash: rm -f $(System.ArtifactsDirectory)/DockerImage/$(dockerExportFileName)
+        displayName: 'Remove uncompressed file'
+
+      - bash: |
+          set -e
+          echo "Loading Docker image and extracting tag..."
+
+          # Load the image and capture the output
+          LOAD_OUTPUT=$(docker exec --privileged -w /$(buildContainerDockerImageFolderName) $(buildContainerName) docker load --input $(dockerExportFileName) 2>&1)
+          echo "$LOAD_OUTPUT"
+
+          # Extract the full image name with tag from the output
+          # Format: "Loaded image: repository:tag"
+          LOADED_IMAGE=$(echo "$LOAD_OUTPUT" | grep "Loaded image:" | sed 's/Loaded image: //')
+
+          if [ -z "$LOADED_IMAGE" ]; then
+            echo "##[error]Failed to extract loaded image name"
+            exit 1
+          fi
+
+          echo "Extracted image: $LOADED_IMAGE"
+          echo "##vso[task.setvariable variable=LOADED_IMAGE_FULL]$LOADED_IMAGE"
+        displayName: 'Load Docker image and extract tag'
+
+      - task: Docker@0
+        displayName: 'Tag Docker image for ECR'
+        inputs:
+          containerregistrytype: Container Registry
+          action: Run a Docker command
+          customCommand: 'exec --privileged -w /$(buildContainerDockerImageFolderName) $(buildContainerName) docker tag $(LOADED_IMAGE_FULL) $(ECR_URL)/$(LOADED_IMAGE_FULL)'
+
+      - task: Docker@0
+        displayName: 'Login to ECR'
+        inputs:
+          containerregistrytype: Container Registry
+          action: Run a Docker command
+          customCommand: 'exec --privileged $(buildContainerName) /bin/sh -c "aws ecr get-login-password --region $(AWS_REGION) | docker login --username AWS --password-stdin $(ECR_URL)"'
+
+      - task: Docker@0
+        displayName: 'Push image to ECR'
+        inputs:
+          containerregistrytype: Container Registry
+          action: Run a Docker command
+          customCommand: 'exec --privileged $(buildContainerName) docker image push $(ECR_URL)/$(LOADED_IMAGE_FULL)'
+
+      # =========================================================================
+      # STEP 6: Capture current state for rollback
+      # =========================================================================
+      - bash: |
+          set -e
+          echo "========================================"
+          echo "CAPTURING STATE FOR ROLLBACK"
+          echo "========================================"
+
+          SERVICE_NAME="${{ parameters.SERVICE_NAME }}"
+          CLUSTER_NAME="platform-services-payment-service-$(TERRAFORM_WORKSPACE)"
+          LONG_SERVICE_NAME="payment-service.${SERVICE_NAME}"
+          REGION="$(AWS_REGION)"
+
+          echo "Service: $SERVICE_NAME"
+          echo "Cluster: $CLUSTER_NAME"
+          echo "Long name: $LONG_SERVICE_NAME"
+          echo "Region: $REGION"
+          echo ""
+
+          # Get current Task Definition ARN
+          echo "Querying ECS for current Task Definition..."
+          CURRENT_TASK_DEF=$(aws ecs describe-services \
+            --cluster "$CLUSTER_NAME" \
+            --services "$LONG_SERVICE_NAME" \
+            --region "$REGION" \
+            --query 'services[0].taskDefinition' \
+            --output text 2>/dev/null || echo "NONE")
+
+          if [ "$CURRENT_TASK_DEF" == "NONE" ] || [ -z "$CURRENT_TASK_DEF" ]; then
+            echo "No existing Task Definition found (new service deployment)"
+            CURRENT_TASK_DEF="NONE"
+          else
+            echo "Current Task Definition: $CURRENT_TASK_DEF"
+          fi
+
+          # Create rollback state directory
+          mkdir -p $(System.ArtifactsDirectory)/rollback-state
+
+          # Save state to JSON
+          cat > $(System.ArtifactsDirectory)/rollback-state/state.json <<EOF
+          {
+            "service_name": "$SERVICE_NAME",
+            "cluster_name": "$CLUSTER_NAME",
+            "long_service_name": "$LONG_SERVICE_NAME",
+            "region": "$REGION",
+            "environment": "$(TERRAFORM_WORKSPACE)",
+            "previous_task_definition_arn": "$CURRENT_TASK_DEF",
+            "release_tag": "$(RELEASE_TAG)",
+            "build_number": "$(Build.BuildNumber)",
+            "captured_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "source_version": "$(Build.SourceVersion)"
+          }
+          EOF
+
+          echo ""
+          echo "State captured and saved to artifact"
+          echo "========================================"
+          cat $(System.ArtifactsDirectory)/rollback-state/state.json
+          echo "========================================"
+        displayName: 'Capture current state for rollback'
+        env:
+          AWS_REGION: $(AWS_REGION)
+
+      # =========================================================================
+      # STEP 7: Publish rollback state artifact
+      # =========================================================================
+      - task: PublishPipelineArtifact@1
+        displayName: 'Publish rollback state artifact'
+        inputs:
+          path: $(System.ArtifactsDirectory)/rollback-state
+          artifactName: 'RollbackState-${{ parameters.SERVICE_NAME }}'
+
+      # =========================================================================
+      # STEP 8: Execute Terraform
+      # =========================================================================
+      - task: Docker@0
+        displayName: 'Terraform init'
+        inputs:
+          containerregistrytype: Container Registry
+          action: Run a Docker command
+          customCommand: 'exec --privileged -w /src/${{ parameters.APPLICATION_FOLDER_NAME }}/terraform $(buildContainerName) terraform init -backend-config=$(TERRAFORM_BACKEND)'
+
+      - task: Docker@0
+        displayName: 'Terraform workspace select'
+        inputs:
+          containerregistrytype: Container Registry
+          action: Run a Docker command
+          customCommand: 'exec --privileged -w /src/${{ parameters.APPLICATION_FOLDER_NAME }}/terraform $(buildContainerName) terraform workspace select $(TERRAFORM_WORKSPACE)'
+
+      - bash: |
+          # Extract just the tag part from LOADED_IMAGE_FULL
+          IMAGE_TAG=$(echo "$(LOADED_IMAGE_FULL)" | cut -d':' -f2)
+          echo "Using build tag for Terraform: $IMAGE_TAG"
+          echo "##vso[task.setvariable variable=BUILD_TAG]$IMAGE_TAG"
+        displayName: 'Extract build tag for Terraform'
+
+      - task: Docker@0
+        displayName: 'Terraform plan'
+        inputs:
+          containerregistrytype: Container Registry
+          action: Run a Docker command
+          customCommand: 'exec --privileged -w /src/${{ parameters.APPLICATION_FOLDER_NAME }}/terraform $(buildContainerName) terraform plan -input=false -out=tfplan -var variable_map={buildNumber:"\"$(BUILD_TAG)\""}'
+
+      - task: Docker@0
+        displayName: 'Terraform apply'
+        inputs:
+          containerregistrytype: Container Registry
+          action: Run a Docker command
+          customCommand: 'exec --privileged -w /src/${{ parameters.APPLICATION_FOLDER_NAME }}/terraform $(buildContainerName) terraform apply -auto-approve tfplan'
+
+      # =========================================================================
+      # STEP 9: Wait for deployment
+      # =========================================================================
+      - bash: |
+          echo "Waiting 3 minutes for deployment to stabilize..."
+          sleep 180
+        displayName: 'Wait for deployment'
+
+      # =========================================================================
+      # STEP 10: Run smoke tests (optional)
+      # =========================================================================
+      - ${{ if eq(parameters.RUN_SMOKE_TESTS, true) }}:
+        - task: Docker@0
+          displayName: 'Restore test project dependencies'
+          inputs:
+            containerregistrytype: Container Registry
+            action: Run a Docker command
+            customCommand: 'exec --privileged -w /src/payment-service.integration.tests $(buildContainerName) dotnet restore'
+
+        - task: Docker@0
+          displayName: 'Run smoke tests'
+          inputs:
+            containerregistrytype: Container Registry
+            action: Run a Docker command
+            customCommand: 'exec --privileged -w /src/payment-service.integration.tests -e DOTNET_ENVIRONMENT=$(DOTNET_ENVIRONMENT) -e PIPELINE_BUILD_NUMBER=$(BUILD_TAG) $(buildContainerName) dotnet test --filter "Category=${{ parameters.APPLICATION_FOLDER_NAME }} & Category=smoke" --logger "trx;LogFileName=smoke-test-results.trx"'
+
+      # =========================================================================
+      # CLEANUP: Stop and remove helper container
+      # =========================================================================
+      - task: Docker@0
+        condition: always()
+        displayName: 'Stop helper container'
+        inputs:
+          containerregistrytype: Container Registry
+          action: Run a Docker command
+          customCommand: 'stop $(buildContainerName)'
+
+      - task: Docker@0
+        condition: always()
+        displayName: 'Remove helper container'
+        inputs:
+          containerregistrytype: Container Registry
+          action: Run a Docker command
+          customCommand: 'rm --force $(buildContainerName)'

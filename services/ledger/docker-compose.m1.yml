@@ -1,0 +1,13 @@
+# docker-compose.m1.yml
+# local development environment
+# Maintained by: Platform Engineering
+
+# docker-compose.m1.yml — local development environment
+
+services:
+  ledger-producer:
+    platform: linux/amd64 # Runs the container in emulation mode to support M1 architecture
+  kafka:
+    platform: linux/amd64
+  karapace-registry:
+    platform: linux/amd64

@@ -1,0 +1,72 @@
+# configsync_auto_pr.yaml
+# configsync_auto_pr configuration
+
+name: ConfigSync Auto PR
+on:
+  push:
+    branches:
+    - configsync/*
+jobs:
+  config_sync:
+    runs-on: coreplatform-dev
+    steps:
+      - name: Checkout ConfigSync Branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+      - name: generate-token
+        id: generate_token
+        uses: tibdex/github-app-token@v1
+        with:
+          app_id: 393558
+          installation_id: 42070849
+          private_key: ${{ secrets.PRIVATE_KEY }}
+      - name: Create ConfigSync PR
+        run: |
+          set -ex
+
+          branch_name="${{ github.ref }}"
+          branch_name="${branch_name#refs/heads/}"
+          
+          pr_output=$(gh pr create -B Major -H $branch_name --title 'Config Sync Changes Merge to Major' --body 'This PR was created automatically by Github Action' 2>&1) || true
+
+          if [ $? -eq 0 ]; then
+            pr_url=$(echo "$pr_output" | awk '/^Pull request created:/{print $NF}')
+            echo "Pull request created: $pr_url"
+            echo "$pr_url" >> "$GITHUB_OUTPUT"
+          else
+            echo "Failed to create the pull request. Error details:"
+            echo "$pr_output"
+            exit 0
+          fi
+
+          gh pr edit "$pr_url" --add-label "configsync" || true
+          gh pr merge "$pr_url" --delete-branch --merge --auto || true
+        env:
+          GITHUB_TOKEN: ${{ steps.generate_token.outputs.token }}
+  peer_approver:
+    needs: config_sync
+    runs-on: coreplatform-dev
+    steps:
+      - name: Checkout ConfigSync Branch
+        uses: actions/checkout@v4
+        with:
+           ref: ${{ github.ref }}
+      - name: PR Approver ConfigSync Branch
+        run: |
+          gh pr review "$pr_url" --approve
+        env:
+          GITHUB_TOKEN: ${{ secrets.PAT_PEER_APPROVER }}
+  major_approver:
+    needs: config_sync
+    runs-on: coreplatform-dev
+    steps:
+     - name: Checkout ConfigSync Branch
+       uses: actions/checkout@v4
+       with:
+          ref: ${{ github.ref }}
+     - name: Major Approver ConfigSync Branch
+       run: |
+          gh pr review "$pr_url" --approve
+       env:
+          GITHUB_TOKEN: ${{ secrets.PAT_MAJOR_APPROVER }}

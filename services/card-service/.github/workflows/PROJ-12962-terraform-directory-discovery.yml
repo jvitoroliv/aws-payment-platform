@@ -1,0 +1,383 @@
+# PROJ-12962-terraform-directory-discovery.yml
+# PROJ-12962-terraform-directory-discovery configuration
+
+name: Terraform Variables Discovery
+
+on:
+  workflow_dispatch:
+  workflow_call:
+    outputs:
+      terraform_changed:
+        description: "Whether Terraform files were changed"
+        value: ${{ jobs.check-terraform-changes.outputs.terraform_changed }}
+      changed_files:
+        description: "List of changed Terraform files"
+        value: ${{ jobs.check-terraform-changes.outputs.changed_files }}
+      terraform_directories:
+        description: "Terraform directories found"
+        value: ${{ jobs.discover-terraform-vars.outputs.terraform_directories }}
+
+jobs:
+  check-terraform-changes:
+    name: Check Terraform Changes
+    runs-on: ubuntu-latest
+    outputs:
+      terraform_changed: ${{ steps.check-changes.outputs.terraform_changed }}
+      changed_files: ${{ steps.check-changes.outputs.changed_files }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for Terraform changes
+        id: check-changes
+        run: |
+          set -e
+          
+          echo "Checking for Terraform file changes in pull request..."
+          
+          # Get the base branch (usually main or master)
+          base_branch="${{ github.event.pull_request.base.ref }}"
+          head_branch="${{ github.event.pull_request.head.ref }}"
+          
+          echo "Base branch: $base_branch"
+          echo "Head branch: $head_branch"
+          
+          # Get list of changed files
+          changed_files=$(git diff --name-only origin/$base_branch...HEAD)
+          
+          echo "All changed files:"
+          echo "$changed_files"
+          echo ""
+          
+          # Filter for Terraform files (.tf and .tfvars)
+          terraform_files=$(echo "$changed_files" | grep -E '\.(tf|tfvars)
+    name: Discover Terraform Variables
+    runs-on: ubuntu-latest
+    outputs:
+      terraform_directories: ${{ steps.discover.outputs.terraform_directories }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Discover Terraform Variables
+        id: discover
+        run: |
+          set -e
+          
+          echo "Searching for *.tfvars files in repository..."
+          
+          # Find all .tfvars files
+          tfvars_files=$(find . -name "*.tfvars" -type f | sort)
+          
+          if [ -z "$tfvars_files" ]; then
+            echo "No .tfvars files found in repository"
+            exit 0
+          fi
+          
+          echo "Found .tfvars files:"
+          echo "$tfvars_files"
+          echo ""
+          
+          # Initialize outputs
+          terraform_directories=""
+          files_count=0
+          
+          # Process each .tfvars file
+          for file in $tfvars_files; do
+            files_count=$((files_count + 1))
+            echo "Processing file: $file"
+            
+            # Get directory path (remove leading ./)
+            dir_path=$(dirname "$file" | sed 's|^\./||')
+            if [ "$dir_path" = "." ]; then
+              dir_path=""
+            fi
+            
+            # Get directory name (last part of path)
+            if [ -n "$dir_path" ]; then
+              dir_name=$(basename "$dir_path")
+            else
+              dir_name="root"
+            fi
+            
+            # Get filename without extension
+            filename=$(basename "$file" .tfvars)
+            
+            # Create variable prefix
+            var_prefix="${dir_name}_${filename}"
+            
+            # Search for aws_region
+            aws_region_line=$(grep -E "^\s*aws_region\s*=" "$file" || echo "")
+            if [ -n "$aws_region_line" ]; then
+              # Extract value between quotes
+              aws_region_value=$(echo "$aws_region_line" | sed -E 's/.*=\s*"([^"]+)".*/\1/')
+              echo "${var_prefix}_region = $aws_region_value"
+              echo "${var_prefix}_region=$aws_region_value" >> $GITHUB_OUTPUT
+            else
+              echo "${var_prefix}_region = não encontrado"
+              echo "${var_prefix}_region=não encontrado" >> $GITHUB_OUTPUT
+            fi
+            
+            # Search for environment
+            environment_line=$(grep -E "^\s*environment\s*=" "$file" || echo "")
+            if [ -n "$environment_line" ]; then
+              # Extract value between quotes
+              environment_value=$(echo "$environment_line" | sed -E 's/.*=\s*"([^"]+)".*/\1/')
+              echo "${var_prefix}_environment = $environment_value"
+              echo "${var_prefix}_environment=$environment_value" >> $GITHUB_OUTPUT
+            else
+              echo "${var_prefix}_environment = não encontrado"
+              echo "${var_prefix}_environment=não encontrado" >> $GITHUB_OUTPUT
+            fi
+            
+            # Set terraform directory
+            if [ -n "$dir_path" ]; then
+              echo "${var_prefix}_terraform_directory = $dir_path"
+              echo "${var_prefix}_terraform_directory=$dir_path" >> $GITHUB_OUTPUT
+              terraform_directories="$terraform_directories$dir_path "
+            else
+              echo "${var_prefix}_terraform_directory = ."
+              echo "${var_prefix}_terraform_directory=." >> $GITHUB_OUTPUT
+              terraform_directories="$terraform_directories. "
+            fi
+            
+            echo ""
+          done
+          
+          # Remove duplicate directories and set output
+          unique_dirs=$(echo "$terraform_directories" | tr ' ' '\n' | sort -u | tr '\n' ' ' | sed 's/ $//')
+          echo "terraform_directories=$unique_dirs" >> $GITHUB_OUTPUT
+          
+          echo "Discovery completed successfully"
+          echo "Total files found: $files_count"
+
+      - name: Summary
+        run: |
+          echo "## Terraform Variables Discovery Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Found Variables:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Find all .tfvars files again for summary
+          tfvars_files=$(find . -name "*.tfvars" -type f | sort)
+          
+          for file in $tfvars_files; do
+            dir_path=$(dirname "$file" | sed 's|^\./||')
+            if [ "$dir_path" = "." ]; then
+              dir_path="root"
+            else
+              dir_name=$(basename "$dir_path")
+            fi
+            filename=$(basename "$file" .tfvars)
+            
+            if [ "$dir_path" = "root" ]; then
+              var_prefix="root_${filename}"
+            else
+              var_prefix="${dir_name}_${filename}"
+            fi
+            
+            echo "**File:** \`$file\`" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            
+            # Check aws_region
+            aws_region_line=$(grep -E "^\s*aws_region\s*=" "$file" || echo "")
+            if [ -n "$aws_region_line" ]; then
+              aws_region_value=$(echo "$aws_region_line" | sed -E 's/.*=\s*"([^"]+)".*/\1/')
+              echo "- ${var_prefix}_region = $aws_region_value" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "- ${var_prefix}_region = não encontrado" >> $GITHUB_STEP_SUMMARY
+            fi
+            
+            # Check environment
+            environment_line=$(grep -E "^\s*environment\s*=" "$file" || echo "")
+            if [ -n "$environment_line" ]; then
+              environment_value=$(echo "$environment_line" | sed -E 's/.*=\s*"([^"]+)".*/\1/')
+              echo "- ${var_prefix}_environment = $environment_value" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "- ${var_prefix}_environment = não encontrado" >> $GITHUB_STEP_SUMMARY
+            fi
+            
+            # Directory
+            if [ "$dir_path" != "root" ]; then
+              echo "- ${var_prefix}_terraform_directory = $dir_path" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "- ${var_prefix}_terraform_directory = ." >> $GITHUB_STEP_SUMMARY
+            fi
+            
+            echo "" >> $GITHUB_STEP_SUMMARY
+          done || true)
+          
+          if [ -n "$terraform_files" ]; then
+            echo "sim"
+            echo "terraform_changed=sim" >> $GITHUB_OUTPUT
+            echo "Terraform files changed:"
+            echo "$terraform_files"
+            # Format files as single line separated by spaces
+            formatted_files=$(echo "$terraform_files" | tr '\n' ' ' | sed 's/ $//')
+            echo "changed_files=$formatted_files" >> $GITHUB_OUTPUT
+          else
+            echo "não"
+            echo "terraform_changed=não" >> $GITHUB_OUTPUT
+            echo "No Terraform files changed"
+            echo "changed_files=" >> $GITHUB_OUTPUT
+          fi
+
+  discover-terraform-vars:
+    needs: check-terraform-changes
+    name: Discover Terraform Variables
+    runs-on: ubuntu-latest
+    outputs:
+      terraform_directories: ${{ steps.discover.outputs.terraform_directories }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Discover Terraform Variables
+        id: discover
+        run: |
+          set -e
+          
+          echo "Searching for *.tfvars files in repository..."
+          
+          # Find all .tfvars files
+          tfvars_files=$(find . -name "*.tfvars" -type f | sort)
+          
+          if [ -z "$tfvars_files" ]; then
+            echo "No .tfvars files found in repository"
+            exit 0
+          fi
+          
+          echo "Found .tfvars files:"
+          echo "$tfvars_files"
+          echo ""
+          
+          # Initialize outputs
+          terraform_directories=""
+          files_count=0
+          
+          # Process each .tfvars file
+          for file in $tfvars_files; do
+            files_count=$((files_count + 1))
+            echo "Processing file: $file"
+            
+            # Get directory path (remove leading ./)
+            dir_path=$(dirname "$file" | sed 's|^\./||')
+            if [ "$dir_path" = "." ]; then
+              dir_path=""
+            fi
+            
+            # Get directory name (last part of path)
+            if [ -n "$dir_path" ]; then
+              dir_name=$(basename "$dir_path")
+            else
+              dir_name="root"
+            fi
+            
+            # Get filename without extension
+            filename=$(basename "$file" .tfvars)
+            
+            # Create variable prefix
+            var_prefix="${dir_name}_${filename}"
+            
+            # Search for aws_region
+            aws_region_line=$(grep -E "^\s*aws_region\s*=" "$file" || echo "")
+            if [ -n "$aws_region_line" ]; then
+              # Extract value between quotes
+              aws_region_value=$(echo "$aws_region_line" | sed -E 's/.*=\s*"([^"]+)".*/\1/')
+              echo "${var_prefix}_region = $aws_region_value"
+              echo "${var_prefix}_region=$aws_region_value" >> $GITHUB_OUTPUT
+            else
+              echo "${var_prefix}_region = não encontrado"
+              echo "${var_prefix}_region=não encontrado" >> $GITHUB_OUTPUT
+            fi
+            
+            # Search for environment
+            environment_line=$(grep -E "^\s*environment\s*=" "$file" || echo "")
+            if [ -n "$environment_line" ]; then
+              # Extract value between quotes
+              environment_value=$(echo "$environment_line" | sed -E 's/.*=\s*"([^"]+)".*/\1/')
+              echo "${var_prefix}_environment = $environment_value"
+              echo "${var_prefix}_environment=$environment_value" >> $GITHUB_OUTPUT
+            else
+              echo "${var_prefix}_environment = não encontrado"
+              echo "${var_prefix}_environment=não encontrado" >> $GITHUB_OUTPUT
+            fi
+            
+            # Set terraform directory
+            if [ -n "$dir_path" ]; then
+              echo "${var_prefix}_terraform_directory = $dir_path"
+              echo "${var_prefix}_terraform_directory=$dir_path" >> $GITHUB_OUTPUT
+              terraform_directories="$terraform_directories$dir_path "
+            else
+              echo "${var_prefix}_terraform_directory = ."
+              echo "${var_prefix}_terraform_directory=." >> $GITHUB_OUTPUT
+              terraform_directories="$terraform_directories. "
+            fi
+            
+            echo ""
+          done
+          
+          # Remove duplicate directories and set output
+          unique_dirs=$(echo "$terraform_directories" | tr ' ' '\n' | sort -u | tr '\n' ' ' | sed 's/ $//')
+          echo "terraform_directories=$unique_dirs" >> $GITHUB_OUTPUT
+          
+          echo "Discovery completed successfully"
+          echo "Total files found: $files_count"
+
+      - name: Summary
+        run: |
+          echo "## Terraform Variables Discovery Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Found Variables:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Find all .tfvars files again for summary
+          tfvars_files=$(find . -name "*.tfvars" -type f | sort)
+          
+          for file in $tfvars_files; do
+            dir_path=$(dirname "$file" | sed 's|^\./||')
+            if [ "$dir_path" = "." ]; then
+              dir_path="root"
+            else
+              dir_name=$(basename "$dir_path")
+            fi
+            filename=$(basename "$file" .tfvars)
+            
+            if [ "$dir_path" = "root" ]; then
+              var_prefix="root_${filename}"
+            else
+              var_prefix="${dir_name}_${filename}"
+            fi
+            
+            echo "**File:** \`$file\`" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            
+            # Check aws_region
+            aws_region_line=$(grep -E "^\s*aws_region\s*=" "$file" || echo "")
+            if [ -n "$aws_region_line" ]; then
+              aws_region_value=$(echo "$aws_region_line" | sed -E 's/.*=\s*"([^"]+)".*/\1/')
+              echo "- ${var_prefix}_region = $aws_region_value" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "- ${var_prefix}_region = não encontrado" >> $GITHUB_STEP_SUMMARY
+            fi
+            
+            # Check environment
+            environment_line=$(grep -E "^\s*environment\s*=" "$file" || echo "")
+            if [ -n "$environment_line" ]; then
+              environment_value=$(echo "$environment_line" | sed -E 's/.*=\s*"([^"]+)".*/\1/')
+              echo "- ${var_prefix}_environment = $environment_value" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "- ${var_prefix}_environment = não encontrado" >> $GITHUB_STEP_SUMMARY
+            fi
+            
+            # Directory
+            if [ "$dir_path" != "root" ]; then
+              echo "- ${var_prefix}_terraform_directory = $dir_path" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "- ${var_prefix}_terraform_directory = ." >> $GITHUB_STEP_SUMMARY
+            fi
+            
+            echo "" >> $GITHUB_STEP_SUMMARY
+          done

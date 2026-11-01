@@ -1,0 +1,598 @@
+name: production-orchestrator-rollback_$(Date:yyyyMMdd)$(rev:.rrr)
+
+# =============================================================================
+# PRODUCTION ORCHESTRATOR ROLLBACK PIPELINE
+# =============================================================================
+# This pipeline performs selective rollback of ECS services to their previous
+# state from a specific deployment tag.
+#
+# How it works:
+# 1. User specifies: tag from original deployment + target environment + services
+# 2. Validate: Find original build and verify artifacts exist
+# 3. Approve: Same approval strategy as normal orchestrator
+# 4. Rollback: For each selected service:
+#    - Download rollback state artifact from original build
+#    - Update ECS service to previous Task Definition ARN
+#    - Sync Terraform state with refreshed reality
+# =============================================================================
+
+trigger: none
+pr: none
+
+parameters:
+  # Tag from the ORIGINAL deployment to rollback FROM
+  - name: rollback_tag
+    displayName: 'Release Tag to Rollback FROM (e.g., v26.01.29)'
+    type: string
+
+  # Target environment
+  - name: target_environment
+    displayName: 'Target Environment'
+    type: string
+    default: 'Prod'
+    values:
+      - Test
+      - Stage
+      - Prod
+
+  # Service selection (20 checkboxes - same as orchestrator)
+  # Command Handlers
+  - name: rollback_command_handler_admin
+    displayName: 'Rollback: command-handler.admin'
+    type: boolean
+    default: false
+
+  - name: rollback_command_handler_case_filing
+    displayName: 'Rollback: command-handler.case-filing'
+    type: boolean
+    default: false
+
+  - name: rollback_command_handler_chargeback
+    displayName: 'Rollback: command-handler.chargeback'
+    type: boolean
+    default: false
+
+  - name: rollback_command_handler_dispute_case
+    displayName: 'Rollback: command-handler.dispute-case'
+    type: boolean
+    default: false
+
+  - name: rollback_command_handler_etl
+    displayName: 'Rollback: command-handler.etl'
+    type: boolean
+    default: false
+
+  - name: rollback_command_handler_export
+    displayName: 'Rollback: command-handler.export'
+    type: boolean
+    default: false
+
+  - name: rollback_command_handler_representment
+    displayName: 'Rollback: command-handler.representment'
+    type: boolean
+    default: false
+
+  # Event Handlers
+  - name: rollback_event_handler_detokenize
+    displayName: 'Rollback: event-handler.detokenize'
+    type: boolean
+    default: false
+
+  - name: rollback_event_handler_dispute_case
+    displayName: 'Rollback: event-handler.dispute-case'
+    type: boolean
+    default: false
+
+  - name: rollback_event_handler_disputed_transaction_file
+    displayName: 'Rollback: event-handler.disputed-transaction-file'
+    type: boolean
+    default: false
+
+  - name: rollback_event_handler_etl
+    displayName: 'Rollback: event-handler.etl'
+    type: boolean
+    default: false
+
+  - name: rollback_event_handler_export
+    displayName: 'Rollback: event-handler.export'
+    type: boolean
+    default: false
+
+  # Discovery
+  - name: rollback_discovery_mastercard
+    displayName: 'Rollback: discovery.mastercard'
+    type: boolean
+    default: false
+
+  - name: rollback_discovery_visa
+    displayName: 'Rollback: discovery.visa'
+    type: boolean
+    default: false
+
+  # Other Services
+  - name: rollback_downloader_disputed_transaction_file
+    displayName: 'Rollback: downloader.disputed-transaction-file'
+    type: boolean
+    default: false
+
+  - name: rollback_enricher_dispute_case
+    displayName: 'Rollback: enricher.dispute-case'
+    type: boolean
+    default: false
+
+  - name: rollback_notifier_disputed_transaction_file
+    displayName: 'Rollback: notifier.disputed-transaction-file'
+    type: boolean
+    default: false
+
+  - name: rollback_parser_disputed_transaction_file
+    displayName: 'Rollback: parser.disputed-transaction-file'
+    type: boolean
+    default: false
+
+  - name: rollback_admin_dead_letter
+    displayName: 'Rollback: admin.dead-letter'
+    type: boolean
+    default: false
+
+  - name: rollback_case_management_web_api
+    displayName: 'Rollback: case-management.web.api'
+    type: boolean
+    default: false
+
+variables:
+  - name: System.Debug
+    value: true
+  - name: AWS_REGION
+    value: 'us-east-1'
+  # Environment-specific variables
+  - name: TARGET_ENV
+    value: ${{ parameters.target_environment }}
+  - ${{ if eq(parameters.target_environment, 'Test') }}:
+    - name: ECR_URL
+      value: '111111111111.dkr.ecr.us-east-1.amazonaws.com'
+    - name: AGENT_POOL
+      value: 'Linux-Test'
+    - name: ADO_ENVIRONMENT
+      value: 'Service-Test-Env'
+    - name: TERRAFORM_BACKEND
+      value: 'test.s3.tfbackend'
+    - name: TERRAFORM_WORKSPACE
+      value: 'test'
+    - name: DOTNET_ENVIRONMENT
+      value: 'test'
+  - ${{ if eq(parameters.target_environment, 'Stage') }}:
+    - name: ECR_URL
+      value: '555555555555.dkr.ecr.us-east-1.amazonaws.com'
+    - name: AGENT_POOL
+      value: 'Linux-Demo'
+    - name: ADO_ENVIRONMENT
+      value: 'Service-Stage-Env'
+    - name: TERRAFORM_BACKEND
+      value: 'stage.s3.tfbackend'
+    - name: TERRAFORM_WORKSPACE
+      value: 'stage'
+    - name: DOTNET_ENVIRONMENT
+      value: 'stage'
+  - ${{ if eq(parameters.target_environment, 'Prod') }}:
+    - name: ECR_URL
+      value: '666666666666.dkr.ecr.us-east-1.amazonaws.com'
+    - name: AGENT_POOL
+      value: 'Linux-Prod'
+    - name: ADO_ENVIRONMENT
+      value: 'Service-Prod-Env'
+    - name: TERRAFORM_BACKEND
+      value: 'prod.s3.tfbackend'
+    - name: TERRAFORM_WORKSPACE
+      value: 'prod'
+    - name: DOTNET_ENVIRONMENT
+      value: 'prod'
+
+resources:
+  repositories:
+    - repository: mainRepository
+      type: github
+      name: example-org/platform-payment-service
+      endpoint: MerchantServices
+      ref: $(Build.SourceBranch)
+
+stages:
+  # ===========================================================================
+  # STAGE 1: VALIDATE ORIGINAL BUILD
+  # ===========================================================================
+  - stage: Stage_Validate
+    displayName: 'Validate Original Build'
+    jobs:
+      - job: Job_Find_Source_Build
+        displayName: 'Find source build by tag'
+        pool:
+          name: 'Linux-Build'
+        steps:
+          - checkout: none
+
+          - bash: |
+              set -e
+              echo "========================================"
+              echo "FINDING SOURCE BUILD"
+              echo "========================================"
+              echo "Rollback tag: ${{ parameters.rollback_tag }}"
+              # GitHub Environment — enables deployment protection rules and secrets scoping
+              echo "Target environment: ${{ parameters.target_environment }}"
+              echo "========================================"
+
+              # Azure DevOps API configuration
+              ORG_URL="https://dev.azure.com/example-org/"
+              PROJECT="MerchantServices"
+              PAT="$(System.AccessToken)"
+              ROLLBACK_TAG="${{ parameters.rollback_tag }}"
+
+              # Get pipeline ID for production-orchestrator
+              echo "Getting pipeline ID for production-orchestrator..."
+              PIPELINE_INFO=$(curl -s -u ":$PAT" \
+                "${ORG_URL}${PROJECT}/_apis/pipelines?api-version=7.0")
+
+              PIPELINE_ID=$(echo "$PIPELINE_INFO" | jq -r '.value[] | select(.name=="production-orchestrator") | .id')
+
+              if [ -z "$PIPELINE_ID" ] || [ "$PIPELINE_ID" == "null" ]; then
+                echo "##[error]Could not find pipeline: production-orchestrator"
+                exit 1
+              fi
+
+              echo "Pipeline ID: $PIPELINE_ID"
+              echo ""
+
+              # Search for builds with the rollback tag
+              echo "Searching for builds with tag: $ROLLBACK_TAG..."
+              BUILD_INFO=$(curl -s -u ":$PAT" \
+                "${ORG_URL}${PROJECT}/_apis/build/builds?definitions=$PIPELINE_ID&tagFilters=$ROLLBACK_TAG&api-version=7.0&\$top=1")
+
+              BUILD_ID=$(echo "$BUILD_INFO" | jq -r '.value[0].id')
+              BUILD_NUMBER=$(echo "$BUILD_INFO" | jq -r '.value[0].buildNumber')
+              BUILD_STATUS=$(echo "$BUILD_INFO" | jq -r '.value[0].status')
+              BUILD_RESULT=$(echo "$BUILD_INFO" | jq -r '.value[0].result')
+
+              if [ -z "$BUILD_ID" ] || [ "$BUILD_ID" == "null" ]; then
+                echo "##[error]========================================" >&2
+                echo "##[error]NO BUILD FOUND WITH TAG: $ROLLBACK_TAG" >&2
+                echo "##[error]========================================" >&2
+                echo "##[error]Possible causes:" >&2
+                echo "##[error]1. Tag was never deployed via production-orchestrator" >&2
+                echo "##[error]2. Tag name is incorrect (case-sensitive)" >&2
+                echo "##[error]3. Build artifacts have expired (>30 days old)" >&2
+                echo "##[error]========================================" >&2
+                exit 1
+              fi
+
+              echo "Source build found:"
+              echo "  Build ID: $BUILD_ID"
+              echo "  Build Number: $BUILD_NUMBER"
+              echo "  Status: $BUILD_STATUS"
+              echo "  Result: $BUILD_RESULT"
+              echo ""
+
+              # Set output variable for next stages
+              echo "##vso[task.setvariable variable=SOURCE_BUILD_ID;isOutput=true]$BUILD_ID"
+              echo "##vso[task.setvariable variable=SOURCE_BUILD_NUMBER;isOutput=true]$BUILD_NUMBER"
+
+              echo "========================================"
+              echo "VALIDATION SUCCESSFUL"
+              echo "========================================"
+              echo "Ready to rollback from build: $BUILD_NUMBER (ID: $BUILD_ID)"
+              echo "========================================"
+            name: FindBuild
+            displayName: 'Find source build via Azure DevOps API'
+            env:
+              SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+
+  # ===========================================================================
+  # STAGE 2: APPROVAL
+  # ===========================================================================
+  - stage: Stage_Approval
+    displayName: 'Rollback Approval'
+    dependsOn: Stage_Validate
+    variables:
+      SOURCE_BUILD_ID: $[stageDependencies.Stage_Validate.Job_Find_Source_Build.outputs['FindBuild.SOURCE_BUILD_ID']]
+      SOURCE_BUILD_NUMBER: $[stageDependencies.Stage_Validate.Job_Find_Source_Build.outputs['FindBuild.SOURCE_BUILD_NUMBER']]
+    jobs:
+      # =========================================================================
+      # Manual Validation for Test/Stage (Agentless)
+      # =========================================================================
+      - job: Manual_Validation_Test_Stage
+        displayName: 'Manual Approval (Test/Stage Only)'
+        pool: server
+        condition: ne(variables['TARGET_ENV'], 'Prod')
+        steps:
+          - task: ManualValidation@0
+            displayName: 'Wait for manual approval of rollback'
+            timeoutInMinutes: 1440  # 24 hours timeout
+            inputs:
+              notifyUsers: 'user@example-company.com'
+              instructions: |
+                ========================================
+                ROLLBACK APPROVAL REQUIRED FOR ${{ parameters.target_environment }}
+                ========================================
+
+                Rollback Tag: ${{ parameters.rollback_tag }}
+                Source Build: $(SOURCE_BUILD_NUMBER)
+                Environment: ${{ parameters.target_environment }}
+
+                Selected Services for Rollback:
+                ${{ if eq(parameters.rollback_command_handler_admin, true) }}
+                - command-handler.admin
+                ${{ endif }}
+                ${{ if eq(parameters.rollback_command_handler_case_filing, true) }}
+                - command-handler.case-filing
+                ${{ endif }}
+                ${{ if eq(parameters.rollback_command_handler_chargeback, true) }}
+                - command-handler.chargeback
+                ${{ endif }}
+                ${{ if eq(parameters.rollback_command_handler_dispute_case, true) }}
+                - command-handler.dispute-case
+                ${{ endif }}
+                ${{ if eq(parameters.rollback_command_handler_etl, true) }}
+                - command-handler.etl
+                ${{ endif }}
+                ${{ if eq(parameters.rollback_command_handler_export, true) }}
+                - command-handler.export
+                ${{ endif }}
+                ${{ if eq(parameters.rollback_command_handler_representment, true) }}
+                - command-handler.representment
+                ${{ endif }}
+                ${{ if eq(parameters.rollback_event_handler_detokenize, true) }}
+                - event-handler.detokenize
+                ${{ endif }}
+                ${{ if eq(parameters.rollback_event_handler_dispute_case, true) }}
+                - event-handler.dispute-case
+                ${{ endif }}
+                ${{ if eq(parameters.rollback_event_handler_disputed_transaction_file, true) }}
+                - event-handler.disputed-transaction-file
+                ${{ endif }}
+                ${{ if eq(parameters.rollback_event_handler_etl, true) }}
+                - event-handler.etl
+                ${{ endif }}
+                ${{ if eq(parameters.rollback_event_handler_export, true) }}
+                - event-handler.export
+                ${{ endif }}
+                ${{ if eq(parameters.rollback_discovery_mastercard, true) }}
+                - discovery.mastercard
+                ${{ endif }}
+                ${{ if eq(parameters.rollback_discovery_visa, true) }}
+                - discovery.visa
+                ${{ endif }}
+                ${{ if eq(parameters.rollback_downloader_disputed_transaction_file, true) }}
+                - downloader.disputed-transaction-file
+                ${{ endif }}
+                ${{ if eq(parameters.rollback_enricher_dispute_case, true) }}
+                - enricher.dispute-case
+                ${{ endif }}
+                ${{ if eq(parameters.rollback_notifier_disputed_transaction_file, true) }}
+                - notifier.disputed-transaction-file
+                ${{ endif }}
+                ${{ if eq(parameters.rollback_parser_disputed_transaction_file, true) }}
+                - parser.disputed-transaction-file
+                ${{ endif }}
+                ${{ if eq(parameters.rollback_admin_dead_letter, true) }}
+                - admin.dead-letter
+                ${{ endif }}
+                ${{ if eq(parameters.rollback_case_management_web_api, true) }}
+                - case-management.web.api
+                ${{ endif }}
+
+                WARNING: This will revert selected services to their state BEFORE deployment $(SOURCE_BUILD_NUMBER).
+
+                Approve only when certain you want to proceed with rollback.
+                ========================================
+              onTimeout: 'reject'
+
+      # =========================================================================
+      # Environment Approval (used for all environments)
+      # =========================================================================
+      - deployment: Job_Approval
+        displayName: 'Approve ${{ parameters.target_environment }} Rollback'
+        dependsOn: Manual_Validation_Test_Stage
+        condition: in(dependencies.Manual_Validation_Test_Stage.result, 'Succeeded', 'Skipped')
+        ${{ if eq(parameters.target_environment, 'Test') }}:
+          environment: 'Service-Test-Env'
+        ${{ if eq(parameters.target_environment, 'Stage') }}:
+          environment: 'Service-Stage-Env'
+        ${{ if eq(parameters.target_environment, 'Prod') }}:
+          environment: 'Service-Prod-Env'
+        pool:
+          name: 'Linux-Build'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: none
+                - bash: |
+                    echo "========================================"
+                    echo "${{ upper(parameters.target_environment) }} ROLLBACK APPROVED"
+                    echo "========================================"
+                    echo "Rollback Tag: ${{ parameters.rollback_tag }}"
+                    echo "Source Build: $(SOURCE_BUILD_NUMBER)"
+                    echo "========================================"
+                  displayName: 'Rollback Approval Summary'
+
+  # ===========================================================================
+  # STAGE 3: EXECUTE ROLLBACK
+  # ===========================================================================
+  - stage: Stage_Rollback
+    displayName: 'Execute Rollback for ${{ parameters.target_environment }}'
+    dependsOn:
+      - Stage_Validate
+      - Stage_Approval
+    variables:
+      SOURCE_BUILD_ID: $[stageDependencies.Stage_Validate.Job_Find_Source_Build.outputs['FindBuild.SOURCE_BUILD_ID']]
+
+    jobs:
+      # =========================================================================
+      # COMMAND HANDLERS
+      # =========================================================================
+      - ${{ if eq(parameters.rollback_command_handler_admin, true) }}:
+        - template: ../payment-service.pipeline.templates/orchestrator-rollback-service.yml
+          parameters:
+            SERVICE_NAME: 'command-handler.admin'
+            CONDITION_VAR: 'rollback_command_handler_admin'
+            APPLICATION_FOLDER_NAME: 'payment-service.command-handler.admin'
+            SOURCE_BUILD_ID: $(SOURCE_BUILD_ID)
+
+      - ${{ if eq(parameters.rollback_command_handler_case_filing, true) }}:
+        - template: ../payment-service.pipeline.templates/orchestrator-rollback-service.yml
+          parameters:
+            SERVICE_NAME: 'command-handler.case-filing'
+            CONDITION_VAR: 'rollback_command_handler_case_filing'
+            APPLICATION_FOLDER_NAME: 'payment-service.command-handler.case-filing'
+            SOURCE_BUILD_ID: $(SOURCE_BUILD_ID)
+
+      - ${{ if eq(parameters.rollback_command_handler_chargeback, true) }}:
+        - template: ../payment-service.pipeline.templates/orchestrator-rollback-service.yml
+          parameters:
+            SERVICE_NAME: 'command-handler.chargeback'
+            CONDITION_VAR: 'rollback_command_handler_chargeback'
+            APPLICATION_FOLDER_NAME: 'payment-service.command-handler.chargeback'
+            SOURCE_BUILD_ID: $(SOURCE_BUILD_ID)
+
+      - ${{ if eq(parameters.rollback_command_handler_dispute_case, true) }}:
+        - template: ../payment-service.pipeline.templates/orchestrator-rollback-service.yml
+          parameters:
+            SERVICE_NAME: 'command-handler.dispute-case'
+            CONDITION_VAR: 'rollback_command_handler_dispute_case'
+            APPLICATION_FOLDER_NAME: 'payment-service.command-handler.dispute-case'
+            SOURCE_BUILD_ID: $(SOURCE_BUILD_ID)
+
+      - ${{ if eq(parameters.rollback_command_handler_etl, true) }}:
+        - template: ../payment-service.pipeline.templates/orchestrator-rollback-service.yml
+          parameters:
+            SERVICE_NAME: 'command-handler.etl'
+            CONDITION_VAR: 'rollback_command_handler_etl'
+            APPLICATION_FOLDER_NAME: 'payment-service.command-handler.etl'
+            SOURCE_BUILD_ID: $(SOURCE_BUILD_ID)
+
+      - ${{ if eq(parameters.rollback_command_handler_export, true) }}:
+        - template: ../payment-service.pipeline.templates/orchestrator-rollback-service.yml
+          parameters:
+            SERVICE_NAME: 'command-handler.export'
+            CONDITION_VAR: 'rollback_command_handler_export'
+            APPLICATION_FOLDER_NAME: 'payment-service.command-handler.export'
+            SOURCE_BUILD_ID: $(SOURCE_BUILD_ID)
+
+      - ${{ if eq(parameters.rollback_command_handler_representment, true) }}:
+        - template: ../payment-service.pipeline.templates/orchestrator-rollback-service.yml
+          parameters:
+            SERVICE_NAME: 'command-handler.representment'
+            CONDITION_VAR: 'rollback_command_handler_representment'
+            APPLICATION_FOLDER_NAME: 'payment-service.command-handler.representment'
+            SOURCE_BUILD_ID: $(SOURCE_BUILD_ID)
+
+      # =========================================================================
+      # EVENT HANDLERS
+      # =========================================================================
+      - ${{ if eq(parameters.rollback_event_handler_detokenize, true) }}:
+        - template: ../payment-service.pipeline.templates/orchestrator-rollback-service.yml
+          parameters:
+            SERVICE_NAME: 'event-handler.detokenize'
+            CONDITION_VAR: 'rollback_event_handler_detokenize'
+            APPLICATION_FOLDER_NAME: 'payment-service.event-handler.detokenize'
+            SOURCE_BUILD_ID: $(SOURCE_BUILD_ID)
+
+      - ${{ if eq(parameters.rollback_event_handler_dispute_case, true) }}:
+        - template: ../payment-service.pipeline.templates/orchestrator-rollback-service.yml
+          parameters:
+            SERVICE_NAME: 'event-handler.dispute-case'
+            CONDITION_VAR: 'rollback_event_handler_dispute_case'
+            APPLICATION_FOLDER_NAME: 'payment-service.event-handler.dispute-case'
+            SOURCE_BUILD_ID: $(SOURCE_BUILD_ID)
+
+      - ${{ if eq(parameters.rollback_event_handler_disputed_transaction_file, true) }}:
+        - template: ../payment-service.pipeline.templates/orchestrator-rollback-service.yml
+          parameters:
+            SERVICE_NAME: 'event-handler.disputed-transaction-file'
+            CONDITION_VAR: 'rollback_event_handler_disputed_transaction_file'
+            APPLICATION_FOLDER_NAME: 'payment-service.event-handler.disputed-transaction-file'
+            SOURCE_BUILD_ID: $(SOURCE_BUILD_ID)
+
+      - ${{ if eq(parameters.rollback_event_handler_etl, true) }}:
+        - template: ../payment-service.pipeline.templates/orchestrator-rollback-service.yml
+          parameters:
+            SERVICE_NAME: 'event-handler.etl'
+            CONDITION_VAR: 'rollback_event_handler_etl'
+            APPLICATION_FOLDER_NAME: 'payment-service.event-handler.etl'
+            SOURCE_BUILD_ID: $(SOURCE_BUILD_ID)
+
+      - ${{ if eq(parameters.rollback_event_handler_export, true) }}:
+        - template: ../payment-service.pipeline.templates/orchestrator-rollback-service.yml
+          parameters:
+            SERVICE_NAME: 'event-handler.export'
+            CONDITION_VAR: 'rollback_event_handler_export'
+            APPLICATION_FOLDER_NAME: 'payment-service.event-handler.export'
+            SOURCE_BUILD_ID: $(SOURCE_BUILD_ID)
+
+      # =========================================================================
+      # DISCOVERY
+      # =========================================================================
+      - ${{ if eq(parameters.rollback_discovery_mastercard, true) }}:
+        - template: ../payment-service.pipeline.templates/orchestrator-rollback-service.yml
+          parameters:
+            SERVICE_NAME: 'discovery.mastercard'
+            CONDITION_VAR: 'rollback_discovery_mastercard'
+            APPLICATION_FOLDER_NAME: 'payment-service.discovery.mastercard'
+            SOURCE_BUILD_ID: $(SOURCE_BUILD_ID)
+
+      - ${{ if eq(parameters.rollback_discovery_visa, true) }}:
+        - template: ../payment-service.pipeline.templates/orchestrator-rollback-service.yml
+          parameters:
+            SERVICE_NAME: 'discovery.visa'
+            CONDITION_VAR: 'rollback_discovery_visa'
+            APPLICATION_FOLDER_NAME: 'payment-service.discovery.visa'
+            SOURCE_BUILD_ID: $(SOURCE_BUILD_ID)
+
+      # =========================================================================
+      # OTHER SERVICES
+      # =========================================================================
+      - ${{ if eq(parameters.rollback_downloader_disputed_transaction_file, true) }}:
+        - template: ../payment-service.pipeline.templates/orchestrator-rollback-service.yml
+          parameters:
+            SERVICE_NAME: 'downloader.disputed-transaction-file'
+            CONDITION_VAR: 'rollback_downloader_disputed_transaction_file'
+            APPLICATION_FOLDER_NAME: 'payment-service.downloader.disputed-transaction-file'
+            SOURCE_BUILD_ID: $(SOURCE_BUILD_ID)
+
+      - ${{ if eq(parameters.rollback_enricher_dispute_case, true) }}:
+        - template: ../payment-service.pipeline.templates/orchestrator-rollback-service.yml
+          parameters:
+            SERVICE_NAME: 'enricher.dispute-case'
+            CONDITION_VAR: 'rollback_enricher_dispute_case'
+            APPLICATION_FOLDER_NAME: 'payment-service.enricher.dispute-case'
+            SOURCE_BUILD_ID: $(SOURCE_BUILD_ID)
+
+      - ${{ if eq(parameters.rollback_notifier_disputed_transaction_file, true) }}:
+        - template: ../payment-service.pipeline.templates/orchestrator-rollback-service.yml
+          parameters:
+            SERVICE_NAME: 'notifier.disputed-transaction-file'
+            CONDITION_VAR: 'rollback_notifier_disputed_transaction_file'
+            APPLICATION_FOLDER_NAME: 'payment-service.notifier.disputed-transaction-file'
+            SOURCE_BUILD_ID: $(SOURCE_BUILD_ID)
+
+      - ${{ if eq(parameters.rollback_parser_disputed_transaction_file, true) }}:
+        - template: ../payment-service.pipeline.templates/orchestrator-rollback-service.yml
+          parameters:
+            SERVICE_NAME: 'parser.disputed-transaction-file'
+            CONDITION_VAR: 'rollback_parser_disputed_transaction_file'
+            APPLICATION_FOLDER_NAME: 'payment-service.parser.disputed-transaction-file'
+            SOURCE_BUILD_ID: $(SOURCE_BUILD_ID)
+
+      - ${{ if eq(parameters.rollback_admin_dead_letter, true) }}:
+        - template: ../payment-service.pipeline.templates/orchestrator-rollback-service.yml
+          parameters:
+            SERVICE_NAME: 'admin.dead-letter'
+            CONDITION_VAR: 'rollback_admin_dead_letter'
+            APPLICATION_FOLDER_NAME: 'payment-service.admin.dead-letter'
+            SOURCE_BUILD_ID: $(SOURCE_BUILD_ID)
+
+      - ${{ if eq(parameters.rollback_case_management_web_api, true) }}:
+        - template: ../payment-service.pipeline.templates/orchestrator-rollback-service.yml
+          parameters:
+            SERVICE_NAME: 'case-management.web.api'
+            CONDITION_VAR: 'rollback_case_management_web_api'
+            APPLICATION_FOLDER_NAME: 'payment-service.case-management.web.api'
+            SOURCE_BUILD_ID: $(SOURCE_BUILD_ID)

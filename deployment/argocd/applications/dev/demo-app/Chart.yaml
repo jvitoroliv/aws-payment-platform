@@ -1,0 +1,16 @@
+# Chart.yaml — Chart configuration
+
+# Chart.yaml — Chart configuration
+
+apiVersion: v2
+name: demo-app
+description: Demo application to showcase Fabric App of Apps pattern
+type: application
+version: 1.0.0
+dependencies:
+  - name: fabric-application
+    repository: https://registry.example.io/artifactory/fabric-helm-prod-virtual
+    version: 3.2.0
+  - name: fabric-webservice
+    repository: https://registry.example.io/artifactory/fabric-helm-prod-virtual
+    version: 4.1.0

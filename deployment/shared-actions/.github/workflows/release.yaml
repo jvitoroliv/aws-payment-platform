@@ -1,0 +1,213 @@
+# Sourced from https://github.com/example-org/shared-workflows/blob/main/.github/workflows/release.yml
+# with changes to include versioning for actions as well as workflows.
+---
+name: Release & Tag
+
+on:
+  push:
+    branches: [ main ]
+
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  changed-workflows:
+    runs-on: [self-hosted, tag-dev]
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: tj-actions/changed-files@v45
+        id: changed-files
+        with:
+          files: |
+            .github/workflows/*.yaml
+            **/action.yaml
+            !.github/workflows/test-*.yaml
+            !.github/workflows/pre-commit.yaml
+            !.github/workflows/opslevel-schema.yaml
+            !.github/workflows/release.yaml
+            !.github/workflows/pr-title-check-call.yaml
+          matrix: true
+          write_output_files: true
+    outputs:
+      matrix: ${{ steps.changed-files.outputs.all_changed_files }}
+
+  release:
+    runs-on: [self-hosted, tag-dev]
+    permissions:
+      contents: write
+      pull-requests: read
+    needs: [changed-workflows]
+    if: ${{ needs.changed-workflows.outputs.matrix != '[]' }}
+    strategy:
+      matrix:
+        file: ${{ fromJSON(needs.changed-workflows.outputs.matrix) }}
+      fail-fast: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Git Config
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+
+      # Check if the matrix file is a workflow or action
+      - name: Check if Workflow or Action
+        id: check-workflow
+        run: |
+          if [[ ${{ matrix.file }} == *".github/workflows/"* ]]; then
+            echo "TYPE=workflow" >> "$GITHUB_OUTPUT"
+          else
+            echo "TYPE=action" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Extracts the version parameter from the workflow file
+      - name: Find version
+        uses: mikefarah/yq@v4
+        if: ${{ steps.check-workflow.outputs.TYPE == 'workflow' }}
+        id: build-version-workflow
+        with:
+          cmd: yq e '.on.workflow_call.inputs.version.default' < ${{ matrix.file }}
+
+      # Extracts the version parameter from the action file
+      - name: Find version
+        uses: mikefarah/yq@v4
+        if: ${{ steps.check-workflow.outputs.TYPE == 'action' }}
+        id: build-version-action
+        with:
+          cmd: yq e '.inputs.version.default' < ${{ matrix.file }}
+
+      # Workflow: Extracts "<workflow_name>" from ".github/workflows/<workflow_name>.yaml"
+      # Action: Extracts "<action_name>" from "./<action_name>/action.yaml"
+      - name: Output Name as ENV var
+        id: workflow-name
+        run: |
+          matrix_file=${{ matrix.file }}
+          if [[ ${{ steps.check-workflow.outputs.TYPE }} == 'workflow' ]]; then
+            file_name=${matrix_file##*/}
+            base_name=${file_name%.*}
+          else
+            base_name=${matrix_file%%/*}
+          fi
+            echo $base_name
+            echo "NAME=${base_name}" >> "$GITHUB_ENV"
+
+      # Formats a tag as <workflow-name>-v<version>
+      - name: Output Tag Name as ENV var
+        id: build-tag
+        run: |
+          if [[ ${{ steps.check-workflow.outputs.TYPE }} == 'workflow' ]]; then
+            version=${{ steps.build-version-workflow.outputs.result }}
+          else
+            version=${{ steps.build-version-action.outputs.result }}
+          fi
+
+          if [[ "$version" == "null"  ]]; then
+            echo "::error::Missing version parameter in ${{ env.NAME }}"
+            exit 1
+          fi
+          tag="${{ env.NAME }}-v${version}"
+          echo "TAG=${tag}" >> "$GITHUB_ENV"
+
+      - name: Check if Git tag already exists
+        run: |
+          echo ${{ env.TAG }}
+          git tag -l | xargs git tag -d  # Delete all local tags
+          git fetch --tags -f
+          if git rev-parse ${{ env.TAG }} >/dev/null 2>&1; then
+            echo "::error::Tag already exists, please bump the version parameter in ${{ env.NAME }}"
+            exit 1
+          fi
+
+      - name: Create Prerelease Tag
+        if: github.ref != 'refs/heads/main'
+        run: |
+          git tag -f $PR_TAG
+          git push -f origin $PR_TAG
+          echo "Prerelease Tag: $PR_TAG" >> "$GITHUB_STEP_SUMMARY"
+        env:
+          PR_TAG: ${{ env.TAG }}-pre.${{ github.event.pull_request.number }}
+
+      - name: Create GitHub Release
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          generate_release_notes: true
+
+      - name: 'Get Previous Tag'
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        id: previous
+        run: |
+          git fetch --tags -f
+          # Gets all tags that are not prerelease, sorts by version, and gets the latest tag -1
+          PREVIOUS_TAG=$(git tag -l "${{ env.NAME }}-v*" | egrep "${{ env.NAME }}-v[0-9]+\.[0-9]+\.[0-9]+$" | sort -V | awk '{a[i++]=$0} END {print a[i-2]}')
+          echo "previous-tag=${PREVIOUS_TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Check if Major Version bump
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        id: check-major
+        run: scripts/check-major.sh "${{ env.TAG }}" "${{ steps.previous.outputs.previous-tag }}"
+
+      # If major bump, create a new major tag (v1, v2 etc)
+      - name: 'Create Major tags'
+        if: ${{ github.ref == 'refs/heads/main' && steps.check-major.outputs.is_major == 'true' }}
+        run: |
+          git tag $TAG_NAME
+          git push origin $TAG_NAME
+          echo "Major version bump detected, created new major tag $TAG_NAME"
+        env:
+          TAG_NAME: ${{ env.NAME }}-${{ steps.check-major.outputs.new_major_version }}
+
+      # If patch or minor, update pinned major tags to reflect new latest commit
+      - name: 'Update major tags'
+        if: ${{ github.ref == 'refs/heads/main' && steps.check-major.outputs.is_major == 'false' }}
+        run: |
+          git tag -f $TAG_NAME
+          git push -f origin $TAG_NAME
+          echo "Minor/Patch version bump detected, updated existing major tag $TAG_NAME"
+        env:
+          TAG_NAME: ${{ env.NAME }}-${{ steps.check-major.outputs.current_major_version }}
+
+      # Get PR number, can't use `${{ github.event.pull_request.number }}` after a merge
+      - name: Get PR Number
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        id: pr-number
+        run: |
+            prNumber=$(gh pr list --state merged --json number,mergedAt --jq 'sort_by(.mergedAt) | reverse | .[0].number')
+            echo "prNumber=${prNumber}" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Cleanup Prerelease Tags
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        run: |
+          tags=$(git tag -l "*$TAG_NAME")
+          # Loop over the tags and delete them
+          for tag in $tags; do
+            git push origin --delete $tag || true
+          done
+        env:
+          TAG_NAME: pre.${{ steps.pr-number.outputs.prNumber }}
+
+  release-status-check:
+    runs-on: [self-hosted, tag-dev]
+    needs:
+      - changed-workflows
+      - release
+    if: always()
+    # Fail if any matrix workflow job was not a success.
+    # https://github.com/orgs/community/discussions/26822#discussioncomment-8285141
+    steps:
+      - name: Fail on workflow error
+        run: exit 1
+        if: >-
+          ${{
+            contains(needs.*.result, 'failure')
+            || contains(needs.*.result, 'cancelled')
+          }}

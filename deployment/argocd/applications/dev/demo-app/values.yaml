@@ -1,0 +1,47 @@
+# values.yaml — Helm chart values
+
+# values.yaml — Helm chart values
+
+fabric-application:
+  nameOverride: demo-app
+  fabricID: tag
+  # GitHub Environment — enables deployment protection rules and secrets scoping
+  environment: dev
+
+  fabricImagePullSecret:
+    enabled: true
+
+fabric-webservice:
+  nameOverride: demo-app
+  fullnameOverride: demo-app
+  fabricID: tag
+  environment: dev
+
+  application:
+    name: demo-app
+
+  image:
+    repository: registry.example.io/fabric-docker-subprod/nginxdemos-hello
+    tag: "0.3"
+    pullPolicy: IfNotPresent
+
+  useSharedImagePullSecret: true
+
+  replicaCount: 1
+
+  resources:
+    requests:
+      memory: 100Mi
+      cpu: 100m
+    limits:
+      memory: 100Mi
+      cpu: 100m
+
+  service:
+    ports:
+      - port: 80
+        targetPort: 80
+
+  istio:
+    private:
+      enabled: true

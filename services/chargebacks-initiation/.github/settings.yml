@@ -1,0 +1,92 @@
+# settings.yml — settings configuration
+
+# settings.yml — settings configuration
+
+---
+_extends: '.github:.github/settings.yml'
+repository:
+  name: cpt-nexus-chargebacks-initiation
+  description: Chargebacks microservice responsible for initiating chargebacks
+  homepage:
+  topics: cpt, chargebacks, disputes
+  private: true
+  visibility: "internal"
+  has_issues: true
+  has_projects: false
+  has_wiki: false
+  has_downloads: false
+  default_branch: main
+  allow_squash_merge: true
+  allow_merge_commit: true
+  allow_rebase_merge: true
+  delete_branch_on_merge: true
+  enable_automated_security_fixes: true
+  enable_vulnerability_alerts: true
+
+labels:
+  - { color: '80C000', name: 'compliance',   description: 'Change for compliance, standards or governance' } # Blueish
+  - { color: '80C000', name: 'feature',   description: '' } # Green
+  - { color: 'FF8000', name: 'refactor',  description: '' } # Orange
+  - { color: 'C00000', name: 'bug',       description: '' } # Red
+  - { color: '00C0FF', name: 'ci',        description: 'Item related to continuous integration' } # Light Blue
+  - { color: '4080FF', name: 'cd',        description: 'Item related to continuous delivery' } # Blue
+  - { color: 'C080FF', name: 'docs',      description: '' } # Light Purple
+  - { color: '000000', name: 'question',  description: '' } # Black
+  - { color: 'C00000', name: 'blocked',   description: '' } # Red
+  - { color: 'DDDDDD', name: 'duplicate', description: '' } # Gray
+  - { color: 'DDDDDD', name: 'invalid',   description: '' } # Gray
+  - { color: 'DDDDDD', name: 'wontfix',   description: '' } # Gray
+  - { color: 'DDDDDD', name: 'released',  description: '' } # Gray
+  - { color: 'B9F542', name: 'proposal',  description: 'A proposal for a standards or template change' } # Yellowish
+  - { color: '4080FF', name: 'release:major',  description: 'Used to bump major for release-on-push-action' }
+  - { color: '4080FF', name: 'release:minor',  description: 'Used to bump minor for release-on-push-action' }
+  - { color: '4080FF', name: 'release:patch',  description: 'Used to bump patch for release-on-push-action' }
+
+# See https://docs.github.com/en/rest/reference/teams#add-or-update-team-repository-permissions for available options
+teams:
+  - name: 'technology'
+    permission: push
+
+branches:
+  - name: master
+    protection:
+      required_pull_request_reviews:
+        required_approving_review_count: 2
+        dismiss_stale_reviews: true
+        require_code_owner_reviews: false
+        dismissal_restrictions:
+          users: [ ]
+          teams: [ ]
+      required_status_checks:
+        strict: true
+        contexts: [ ]
+      enforce_admins: true
+      required_linear_history: true
+
+      # Required. Restrict who can push to this branch. Team and user restrictions are only available for
+      # organization-owned repositories. Set to null to disable.
+      restrictions: null
+  #        apps: [ ]
+  #        users: [ ]
+  #        teams: [ ]
+  - name: main
+    protection:
+      required_pull_request_reviews:
+        required_approving_review_count: 2
+        dismiss_stale_reviews: true
+        require_code_owner_reviews: false
+        dismissal_restrictions:
+          users: [ ]
+          teams: [ ]
+      required_status_checks:
+        strict: true
+        contexts: [ ]
+      enforce_admins: true
+      required_linear_history: true
+
+      # Required. Restrict who can push to this branch. Team and user restrictions are only available for
+      # organization-owned repositories. Set to null to disable.
+      restrictions: null
+  #        apps: [ ]
+  #        users: [ ]
+  #        teams: [ ]

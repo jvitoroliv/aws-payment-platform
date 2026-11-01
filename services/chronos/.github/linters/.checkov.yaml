@@ -1,0 +1,43 @@
+# .checkov.yaml — .checkov configuration
+
+# .checkov.yaml — .checkov configuration
+
+skip-check:
+  - CKV_AWS_158 # Ensure that CloudWatch Log Group is encrypted by KMS
+  - CKV_AWS_337
+  - CKV_AWS_237
+  - CKV_AWS_59
+  - CKV_AWS_73
+  - CKV_AWS_76
+  - CKV_AWS_120
+  - CKV_AWS_225
+  - CKV_AWS_173
+  - CKV_AWS_272
+  - CKV_AWS_50
+  - CKV_AWS_116
+  - CKV_AWS_276
+  - CKV_AWS_290
+  - CKV_AWS_355
+  - CKV_AWS_27
+  - CKV_AWS_26
+  - CKV2_AWS_34
+  - CKV2_AWS_11
+  - CKV2_AWS_53
+  - CKV2_AWS_12
+  - CKV2_AWS_51
+  - CKV_AWS_27
+  - CKV2_AWS_34
+  - CKV2_AWS_11
+  - CKV2_AWS_53
+  - CKV2_AWS_12
+  - CKV2_AWS_51
+  - CKV_DOCKER_2
+  - CKV_DOCKER_3
+  - CKV2_GHA_1
+  - CKV_GHA_7
+  - CKV2_DOCKER_2
+  - CKV_OPENAPI_4
+  - CKV_OPENAPI_5
+  - CKV_OPENAPI_21
+  - CKV_OPENAPI_20
+  - CKV_OPENAPI_3

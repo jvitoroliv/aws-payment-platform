@@ -1,0 +1,38 @@
+# docker-compose.yml
+# local development environment
+# Maintained by: Platform Engineering
+
+# docker-compose.yml — local development environment
+
+version: "3.7"
+services:
+  builder:
+    build:
+      context: .
+    container_name: builder
+    platform: ${TARGETPLATFORM} # Dynamically set based on the host architecture
+    # GitHub Environment — enables deployment protection rules and secrets scoping
+    environment:
+      - GOOS=linux
+      - GOARCH=${TARGETARCH} # Automatically set GOARCH based on host architecture
+      - CGO_ENABLED=0
+      - GIT_COMMIT="${GIT_COMMIT:-local}"
+      - MONGO_URI=mongodb://mongo:27017
+      - MEMONGO_MONGOD_BIN=/usr/bin/mongod # FIXME This doesn't look like it exists or is being used.
+      - DOCKER_DEFAULT_PLATFORM=${TARGETPLATFORM} # Use the platform specified by the host
+      - GITHUB_AUTH_TOKEN=${GITHUB_AUTH_TOKEN}
+      - GITHUB_USERNAME=${GITHUB_USERNAME}
+    volumes:
+      - ../../:/go/src/github.com/example-org/ps-tag-chronos
+    working_dir: /go/src/github.com/example-org/ps-tag-chronos
+    depends_on:
+      - mongo
+    command: bash -c "npm install mongoose && node docker/builder/createDatabase.js"
+
+  mongo:
+    image: mongo:7.0
+    ports:
+      - "27019:27017"
+    volumes:
+      - ./../../automation-tests/seed-data:/jsfiles
+    working_dir: /jsfiles

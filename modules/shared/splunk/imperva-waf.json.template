@@ -1,0 +1,468 @@
+{
+    "title": "TAG - Imperva WAF",
+    "description": "",
+    "inputs": {
+        "input_env": {
+            "options": {
+                "defaultValue": "api.platform.example.com,common-api.platform.example.com,www.platform.example.com",
+                "items": [
+                    {
+                        "data": {
+                            "api": "api.platform.example.com"
+                        },
+                        "label": "Prod",
+                        "value": "api.platform.example.com,common-api.platform.example.com,www.platform.example.com"
+                    },
+                    {
+                        "data": {
+                            "api": "api.platform.example.com"
+                        },
+                        "label": "Dev",
+                        "value": "api.dev.platform.example.com,common-api.dev.platform.example.com,www.dev.platform.example.com"
+                    },
+                    {
+                        "data": {
+                            "api": "api.platform.example.com"
+                        },
+                        "label": "Test",
+                        "value": "api.test.platform.example.com,common-api.test.platform.example.com,www.test.platform.example.com"
+                    },
+                    {
+                        "data": {
+                            "api": "api.stage.platform.example.com"
+                        },
+                        "label": "Stage",
+                        "value": "api.stage.platform.example.com,common-api.stage.platform.example.com,www.stage.platform.example.com"
+                    }
+                ],
+                "token": "env"
+            },
+            "title": "Environment",
+            "type": "input.dropdown"
+        },
+        "input_global_trp": {
+            "options": {
+                "defaultValue": "-4h@m,now",
+                "token": "global_time"
+            },
+            "title": "Global Time Range",
+            "type": "input.timerange"
+        }
+    },
+    "defaults": {
+        "dataSources": {
+            "ds.search": {
+                "options": {
+                    "queryParameters": {
+                        "earliest": "$global_time.earliest$",
+                        "latest": "$global_time.latest$"
+                    }
+                }
+            }
+        }
+    },
+    "visualizations": {
+        "viz_I8FYOIDJ": {
+            "dataSources": {
+                "primary": "ds_TVXNNARO_ds_G17rm9BJ_ds_Ly7JMZNv"
+            },
+            "options": {
+                "legendTruncation": "ellipsisOff",
+                "xAxisLabelVisibility": "show",
+                "xAxisTitleText": "Time"
+            },
+            "title": "platform.example.com - Imperva WAF - (source - action)",
+            "type": "splunk.line"
+        },
+        "viz_KKTdEzbi": {
+            "dataSources": {
+                "primary": "ds_Hj6LxCwa_ds_IyAVvo8L_ds_Ly7JMZNv"
+            },
+            "options": {
+                "legendTruncation": "ellipsisOff",
+                "xAxisLabelVisibility": "show",
+                "xAxisTitleText": "Time"
+            },
+            "title": "www.platform.example.com - Imperva WAF - (source - action)",
+            "type": "splunk.line"
+        },
+        "viz_OXKQXO99": {
+            "dataSources": {
+                "primary": "ds_Z0No4bb0_ds_ORt7v1GL"
+            },
+            "options": {
+                "legendTruncation": "ellipsisOff",
+                "xAxisLabelVisibility": "show",
+                "xAxisTitleText": "Time"
+            },
+            "title": "platform.example.com - ALB - (source - elb_status_code)",
+            "type": "splunk.line"
+        },
+        "viz_PT5iqIHX": {
+            "dataSources": {
+                "primary": "ds_Ly7JMZNv"
+            },
+            "options": {
+                "legendTruncation": "ellipsisOff",
+                "xAxisLabelVisibility": "show",
+                "xAxisTitleText": "Time"
+            },
+            "title": "www.platform.example.com - Imperva WAF - (source - action)",
+            "type": "splunk.line"
+        },
+        "viz_apX6tYVb": {
+            "dataSources": {
+                "primary": "ds_IyAVvo8L_ds_Ly7JMZNv"
+            },
+            "options": {
+                "legendTruncation": "ellipsisOff",
+                "xAxisLabelVisibility": "show",
+                "xAxisTitleText": "Time"
+            },
+            "title": "www.platform.example.com - Imperva WAF - (source - action)",
+            "type": "splunk.line"
+        },
+        "viz_hzeciswj": {
+            "dataSources": {
+                "primary": "ds_G17rm9BJ_ds_Ly7JMZNv"
+            },
+            "options": {
+                "legendTruncation": "ellipsisOff",
+                "xAxisLabelVisibility": "show",
+                "xAxisTitleText": "Time"
+            },
+            "title": "platform.example.com - Imperva WAF - (source - action)",
+            "type": "splunk.line"
+        },
+        "viz_iemkkNb1": {
+            "dataSources": {
+                "primary": "ds_Wh3guA8s_ds_TVXNNARO_ds_G17rm9BJ_ds_Ly7JMZNv"
+            },
+            "options": {
+                "legendTruncation": "ellipsisOff",
+                "xAxisLabelVisibility": "show",
+                "xAxisTitleText": "Time"
+            },
+            "title": "platform.example.com - Imperva WAF - (source - action)",
+            "type": "splunk.line"
+        },
+        "viz_vB8vga3K": {
+            "dataSources": {
+                "primary": "ds_ORt7v1GL"
+            },
+            "options": {
+                "legendTruncation": "ellipsisOff",
+                "xAxisLabelVisibility": "show",
+                "xAxisTitleText": "Time"
+            },
+            "title": "www.platform.example.com - ALB - (source - elb_status_code)",
+            "type": "splunk.line"
+        }
+    },
+    "dataSources": {
+        "ds_C17LwbiK_ds_blocked_requests": {
+            "name": "Blocked Requests - Common API",
+            "options": {
+                "query": "index=corp_prod_imperva_waf | where sourceServiceName=mvindex(split(\"$env$\", \",\"), 1) AND act!=\"REQ_PASSED\"\n| rex field=act \"(?<block_reason>.*)\"\n| eval timestamp=strftime(_time, \"%Y-%m-%d %H:%M:%S\")\n| eval combined_key=src . \" - \" . block_reason\n| timechart span=1h limit=10 count by combined_key useother=false\n| rename timestamp as Time\n| fillnull value=0",
+                "queryParameters": {
+                    "earliest": "$global_time.earliest$",
+                    "latest": "$global_time.latest$"
+                }
+            },
+            "type": "ds.search"
+        },
+        "ds_G17rm9BJ_ds_Ly7JMZNv": {
+            "name": "non-www-imperva",
+            "options": {
+                "query": "index=corp_prod_imperva_waf sourceServiceName=\"www.platform.example.com\" AND url=\"platform.example.com*\"\n| eval client_ip = src | \neval client_source = case(\n{{CIDRMATCH_SECTION}}\n)\n| eval combined_key=client_source . \" - \" . act \n| timechart limit=0 count by combined_key"
+            },
+            "type": "ds.search"
+        },
+        "ds_Hj6LxCwa_ds_IyAVvo8L_ds_Ly7JMZNv": {
+            "name": "www-imperva-blocked-known",
+            "options": {
+                "query": "index=corp_prod_imperva_waf sourceServiceName=\"www.platform.example.com\" AND url=\"www.platform.example.com*\" AND action!=\"allowed\"| \neval client_ip = src | \neval client_source = case(\n{{CIDRMATCH_SECTION}}\n)\n| search client_source!=\"Unknown - *\"\n| eval combined_key=client_source . \" - \" . act \n| timechart count by combined_key"
+            },
+            "type": "ds.search"
+        },
+        "ds_IyAVvo8L_ds_Ly7JMZNv": {
+            "name": "www-imperva-blocked",
+            "options": {
+                "query": "index=corp_prod_imperva_waf sourceServiceName=\"www.platform.example.com\" AND url=\"www.platform.example.com*\" AND action!=\"allowed\"| \neval client_ip = src | \neval client_source = case(\n{{CIDRMATCH_SECTION}}\n)\n| eval combined_key=client_source . \" - \" . act \n| timechart count by combined_key"
+            },
+            "type": "ds.search"
+        },
+        "ds_Ly7JMZNv": {
+            "name": "www-imperva",
+            "options": {
+                "query": "index=corp_prod_imperva_waf sourceServiceName=\"www.platform.example.com\" AND url=\"www.platform.example.com*\" | \neval client_ip = src | \neval client_source = case(\n{{CIDRMATCH_SECTION}}\n)\n| eval combined_key=client_source . \" - \" . act \n| timechart limit=0 count by combined_key"
+            },
+            "type": "ds.search"
+        },
+        "ds_ORt7v1GL": {
+            "name": "www-alb",
+            "options": {
+                "query": "index=tag-prod sourcetype=\"access_logs\" elb=\"app/ecs-fgate-alb-web-prod/119513f77f7be391\" request=\"*https://www.platform.example.com*\" |\neval client_source = case(\n{{CIDRMATCH_SECTION}}\n)\n| eval combined_key=client_source . \" - \" . elb_status_code |\ntimechart count by combined_key"
+            },
+            "type": "ds.search"
+        },
+        "ds_PDxgly5C_ds_requests_web": {
+            "name": "All Requests - Web",
+            "options": {
+                "query": "index=corp_prod_imperva_waf | where sourceServiceName=mvindex(split(\"$env$\", \",\"), 2) | timechart span=1h sum(act_*) as *",
+                "queryParameters": {
+                    "earliest": "$global_time.earliest$",
+                    "latest": "$global_time.latest$"
+                }
+            },
+            "type": "ds.search"
+        },
+        "ds_T0Kj3HjM_ds_requests_web": {
+            "name": "Requests - Web copy 1",
+            "options": {
+                "query": "index=corp_prod_imperva_waf | where sourceServiceName=mvindex(split(\"$env$\", \",\"), 2) | eval act_{act} = 1 | timechart span=1h sum(act_*) as *",
+                "queryParameters": {
+                    "earliest": "$global_time.earliest$",
+                    "latest": "$global_time.latest$"
+                }
+            },
+            "type": "ds.search"
+        },
+        "ds_TVXNNARO_ds_G17rm9BJ_ds_Ly7JMZNv": {
+            "name": "non-www-imperva-blocked",
+            "options": {
+                "query": "index=corp_prod_imperva_waf sourceServiceName=\"www.platform.example.com\" AND url=\"platform.example.com*\" AND action!=\"allowed\"\n| eval client_ip = src | \neval client_source = case(\n{{CIDRMATCH_SECTION}}\n)\n| eval combined_key=client_source . \" - \" . act \n| timechart count by combined_key"
+            },
+            "type": "ds.search"
+        },
+        "ds_UI9uI1pK": {
+            "name": "All TAG Failed Requests",
+            "options": {
+                "extend": "ds_all_requests",
+                "query": "act!=REQ_PASSED"
+            },
+            "type": "ds.chain"
+        },
+        "ds_Wh3guA8s_ds_TVXNNARO_ds_G17rm9BJ_ds_Ly7JMZNv": {
+            "name": "non-www-imperva-blocked-known",
+            "options": {
+                "query": "index=corp_prod_imperva_waf sourceServiceName=\"www.platform.example.com\" AND url=\"platform.example.com*\" AND action!=\"allowed\"\n| eval client_ip = src | \neval client_source = case(\n{{CIDRMATCH_SECTION}}\n)\n| search client_source!=\"Unknown - *\"\n| eval combined_key=client_source . \" - \" . act \n| timechart count by combined_key"
+            },
+            "type": "ds.search"
+        },
+        "ds_Z0No4bb0_ds_ORt7v1GL": {
+            "name": "non-www-alb",
+            "options": {
+                "query": "index=tag-prod sourcetype=\"access_logs\" elb=\"app/ecs-fgate-alb-web-prod/119513f77f7be391\" request=\"*https://platform.example.com*\" |\neval client_source = case(\n{{CIDRMATCH_SECTION}}\n)\n| eval combined_key=client_source . \" - \" . elb_status_code |\ntimechart limit=0 count by combined_key"
+            },
+            "type": "ds.search"
+        },
+        "ds_all_requests": {
+            "name": "All TAG Requests",
+            "options": {
+                "query": "index=corp_prod_imperva_waf | where sourceServiceName IN (split(\"$env$\", \",\")) \n|  timechart",
+                "queryParameters": {
+                    "earliest": "$global_time.earliest$",
+                    "latest": "$global_time.latest$"
+                }
+            },
+            "type": "ds.search"
+        },
+        "ds_blocked_requests": {
+            "name": "Blocked Requests - API",
+            "options": {
+                "query": "index=corp_prod_imperva_waf | where sourceServiceName=mvindex(split(\"$env$\", \",\"), 0) AND act!=\"REQ_PASSED\"\n| rex field=act \"(?<block_reason>.*)\"\n| eval timestamp=strftime(_time, \"%Y-%m-%d %H:%M:%S\")\n| eval combined_key=src . \" - \" . block_reason\n| timechart span=1h limit=10 count by combined_key useother=false\n| rename timestamp as Time\n| fillnull value=0",
+                "queryParameters": {
+                    "earliest": "$global_time.earliest$",
+                    "latest": "$global_time.latest$"
+                }
+            },
+            "type": "ds.search"
+        },
+        "ds_fK9OJTtt_ds_ORt7v1GL": {
+            "name": "tag_web_alb_requests copy 1",
+            "options": {
+                "query": "index=tag-prod sourcetype=\"access_logs\" elb=\"app/ecs-fgate-alb-web-prod/119513f77f7be391\" |\ntimechart count by client_ip"
+            },
+            "type": "ds.search"
+        },
+        "ds_requests_api": {
+            "name": "Requests - API",
+            "options": {
+                "query": "index=corp_prod_imperva_waf | where sourceServiceName=mvindex(split(\"$env$\", \",\"), 0) | eval act_{act} = 1 | timechart span=1h sum(act_*) as *",
+                "queryParameters": {
+                    "earliest": "$global_time.earliest$",
+                    "latest": "$global_time.latest$"
+                }
+            },
+            "type": "ds.search"
+        },
+        "ds_requests_common_api": {
+            "name": "Requests - Common API",
+            "options": {
+                "query": "index=corp_prod_imperva_waf | where sourceServiceName=mvindex(split(\"$env$\", \",\"), 1) | eval act_{act} = 1 | timechart span=1h sum(act_*) as *",
+                "queryParameters": {
+                    "earliest": "$global_time.earliest$",
+                    "latest": "$global_time.latest$"
+                }
+            },
+            "type": "ds.search"
+        },
+        "ds_requests_web": {
+            "name": "Requests - Web",
+            "options": {
+                "query": "index=corp_prod_imperva_waf | where sourceServiceName=mvindex(split(\"$env$\", \",\"), 2) | eval act_{act} = 1 | timechart span=1h sum(act_*) as *",
+                "queryParameters": {
+                    "earliest": "$global_time.earliest$",
+                    "latest": "$global_time.latest$"
+                }
+            },
+            "type": "ds.search"
+        },
+        "ds_sBcW3K97_ds_C17LwbiK_ds_blocked_requests": {
+            "name": "Blocked Requests - Web",
+            "options": {
+                "query": "index=corp_prod_imperva_waf | where sourceServiceName=mvindex(split(\"$env$\", \",\"), 2) AND act!=\"REQ_PASSED\"\n| rex field=act \"(?<block_reason>.*)\"\n| eval timestamp=strftime(_time, \"%Y-%m-%d %H:%M:%S\")\n| eval combined_key=src . \" - \" . block_reason\n| timechart span=1h limit=10 count by combined_key useother=false\n| rename timestamp as Time\n| fillnull value=0",
+                "queryParameters": {
+                    "earliest": "$global_time.earliest$",
+                    "latest": "$global_time.latest$"
+                }
+            },
+            "type": "ds.search"
+        }
+    },
+    "layout": {
+        "globalInputs": [
+            "input_global_trp",
+            "input_env"
+        ],
+        "layoutDefinitions": {
+            "layout_EreqqOW3": {
+                "structure": [
+                    {
+                        "item": "viz_vB8vga3K",
+                        "position": {
+                            "h": 400,
+                            "w": 1200,
+                            "x": 0,
+                            "y": 0
+                        },
+                        "type": "block"
+                    },
+                    {
+                        "item": "viz_OXKQXO99",
+                        "position": {
+                            "h": 400,
+                            "w": 1200,
+                            "x": 0,
+                            "y": 400
+                        },
+                        "type": "block"
+                    }
+                ],
+                "type": "grid"
+            },
+            "layout_FsdKYPV1": {
+                "structure": [
+                    {
+                        "item": "viz_KKTdEzbi",
+                        "position": {
+                            "h": 400,
+                            "w": 1200,
+                            "x": 0,
+                            "y": 0
+                        },
+                        "type": "block"
+                    },
+                    {
+                        "item": "viz_iemkkNb1",
+                        "position": {
+                            "h": 400,
+                            "w": 1200,
+                            "x": 0,
+                            "y": 400
+                        },
+                        "type": "block"
+                    }
+                ],
+                "type": "grid"
+            },
+            "layout_H02QH3PT": {
+                "structure": [
+                    {
+                        "item": "viz_apX6tYVb",
+                        "position": {
+                            "h": 400,
+                            "w": 1200,
+                            "x": 0,
+                            "y": 0
+                        },
+                        "type": "block"
+                    },
+                    {
+                        "item": "viz_I8FYOIDJ",
+                        "position": {
+                            "h": 400,
+                            "w": 1200,
+                            "x": 0,
+                            "y": 400
+                        },
+                        "type": "block"
+                    }
+                ],
+                "type": "grid"
+            },
+            "layout_wEnH4jEU": {
+                "structure": [
+                    {
+                        "item": "viz_hzeciswj",
+                        "position": {
+                            "h": 400,
+                            "w": 1200,
+                            "x": 0,
+                            "y": 384
+                        },
+                        "type": "block"
+                    },
+                    {
+                        "item": "viz_PT5iqIHX",
+                        "position": {
+                            "h": 384,
+                            "w": 1200,
+                            "x": 0,
+                            "y": 0
+                        },
+                        "type": "block"
+                    }
+                ],
+                "type": "grid"
+            }
+        },
+        "options": {},
+        "tabs": {
+            "items": [
+                {
+                    "label": "Imperva - All Requests",
+                    "layoutId": "layout_wEnH4jEU"
+                },
+                {
+                    "label": "Imperva - Failed Requests - Known Sources",
+                    "layoutId": "layout_FsdKYPV1"
+                },
+                {
+                    "label": "Imperva - Failed Requests - All",
+                    "layoutId": "layout_H02QH3PT"
+                },
+                {
+                    "label": "ALB - All Requests",
+                    "layoutId": "layout_EreqqOW3"
+                }
+            ]
+        }
+    },
+    "applicationProperties": {
+        "hideEdit": false,
+        "hideExport": false,
+        "hideOpenInSearch": false
+    }
+}

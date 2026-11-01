@@ -1,0 +1,24 @@
+# template-steps-Compile.yaml
+# template-steps-Compile configuration
+
+parameters:
+- name: Target
+  type: string
+  default: ''
+
+steps:
+  - task: MSBuild@1
+    displayName: Compile ${{ parameters.Target }}
+    inputs:
+      solution: Compile.proj
+      msbuildVersion: 15.0
+      platform: Any CPU
+      configuration: Release
+      msbuildArguments: '-target:${{ parameters.Target }}'
+      
+  - task: BuildQualityChecks@8
+    displayName: Check build quality
+    inputs:
+      checkWarnings: true
+      warningFailOption: fixed
+      warningThreshold: 6

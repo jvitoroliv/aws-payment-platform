@@ -1,0 +1,4 @@
+encrypt = true
+bucket  = "corp-subprod-terraform-state-store-us-east-1"
+key     = "secrets-manager-test.tfstate"
+region  = "us-east-1"

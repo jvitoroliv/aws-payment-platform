@@ -1,0 +1,20 @@
+# terrascan configuration file https://github.com/accurics/terrascan/blob/master/config/terrascan.toml
+
+# scan and skip rules configuration
+[rules]
+# scan rules (list of rules to scan, adding rules here will override rules in the policy path)
+# scan-rules = [
+#     "AWS.S3Bucket.DS.High.1043",
+#     "AWS.S3Bucket.IAM.High.0370"
+# ]
+
+# skip rules (list of rules to skip)
+skip-rules = [
+    "AWS.APIGateway.NetworkSecurity.Medium.0570",
+    "AWS.APIGateway.Logging.Medium.0567",
+    "AWS.APGM.IS.LOW.0056",
+    "AWS.APIGateway.Logging.Medium.0571",
+    "AWS.LambdaFunction.EncryptionandKeyManagement.0471",
+    "AWS.LambdaFunction.Logging.0470",
+    "AWS.LambdaFunction.LM.MEDIUM.0063"
+]

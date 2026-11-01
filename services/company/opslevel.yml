@@ -1,0 +1,38 @@
+# opslevel.yml — opslevel configuration
+
+# opslevel.yml — opslevel configuration
+
+---
+version: 1
+service:
+  name: ps-tag-company
+  lifecycle: pre-alpha
+  tier: tier_4
+  product: Transact Global
+  owner: tag
+  language: golang
+  framework: other
+  description: TAG Company Kafka producer
+  aliases:
+    - example-org/ps-tag-company
+    - ps-tag-company
+    - company-producer
+  repositories:
+    - name: example-org/ps-tag-company
+      path: "/"
+      provider: github
+  tools:
+    - name: DeepSource
+      category: code
+      url: https://app.deepsource.com/gh/example-org/ps-tag-company
+  dependencies: []
+  tags:
+    - key: containerized
+      value: yes
+    - key: pci
+      value: no
+    - key: scope
+      value: internal
+    - key: type
+      value: backend
+    

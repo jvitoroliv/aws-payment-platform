@@ -1,0 +1,115 @@
+# PROJ-12962-check-terraform-changes.yml
+# PROJ-12962-check-terraform-changes configuration
+
+name: Check Terraform Changes
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  check-terraform-changes:
+    name: Check Terraform Changes
+    runs-on: ubuntu-latest
+    outputs:
+      terraform_changed: ${{ steps.check.outputs.terraform_changed }}
+      changed_directories: ${{ steps.check.outputs.changed_directories }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check Terraform Changes
+        id: check
+        run: |
+          set -e
+          
+          echo "Checking for Terraform file changes in PR..."
+          
+          # Get the base branch (usually main or master)
+          base_branch="${{ github.event.pull_request.base.ref }}"
+          head_branch="${{ github.event.pull_request.head.ref }}"
+          
+          echo "Base branch: $base_branch"
+          echo "Head branch: $head_branch"
+          
+          # Get changed files in the PR
+          changed_files=$(git diff --name-only origin/$base_branch...HEAD)
+          
+          if [ -z "$changed_files" ]; then
+            echo "No files changed in PR"
+            echo "terraform_changed=false" >> $GITHUB_OUTPUT
+            echo "changed_directories=Nenhuma mudança no terraform" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          echo "Changed files in PR:"
+          echo "$changed_files"
+          echo ""
+          
+          # Filter for .tf and .tfvars files
+          terraform_files=$(echo "$changed_files" | grep -E '\.(tf|tfvars)$' || echo "")
+          
+          if [ -z "$terraform_files" ]; then
+            echo "No Terraform files changed"
+            echo "terraform_changed=false" >> $GITHUB_OUTPUT
+            echo "changed_directories=Nenhuma mudança no terraform" >> $GITHUB_OUTPUT
+          else
+            echo "Terraform files changed:"
+            echo "$terraform_files"
+            echo ""
+            
+            # Get directories containing changed Terraform files
+            terraform_directories=""
+            
+            for file in $terraform_files; do
+              # Get directory path
+              dir_path=$(dirname "$file")
+              
+              # Normalize path (remove leading ./)
+              if [ "$dir_path" = "." ]; then
+                dir_path="root"
+              fi
+              
+              terraform_directories="$terraform_directories$dir_path "
+              echo "Changed file: $file (directory: $dir_path)"
+            done
+            
+            # Remove duplicates and format output
+            unique_dirs=$(echo "$terraform_directories" | tr ' ' '\n' | sort -u | grep -v '^$' | tr '\n' ' ' | sed 's/ $//')
+            
+            echo ""
+            echo "Directories with Terraform changes: $unique_dirs"
+            
+            echo "terraform_changed=true" >> $GITHUB_OUTPUT
+            echo "changed_directories=$unique_dirs" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Summary
+        run: |
+          echo "## Terraform Changes Check Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ steps.check.outputs.terraform_changed }}" = "true" ]; then
+            echo "### Terraform files were modified in this PR" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Affected directories:**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            
+            # Get changed files again for detailed summary
+            base_branch="${{ github.event.pull_request.base.ref }}"
+            changed_files=$(git diff --name-only origin/$base_branch...HEAD)
+            terraform_files=$(echo "$changed_files" | grep -E '\.(tf|tfvars)$' || echo "")
+            
+            for file in $terraform_files; do
+              echo "- \`$file\`" >> $GITHUB_STEP_SUMMARY
+            done
+            
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Directories:** ${{ steps.check.outputs.changed_directories }}" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### No Terraform files were modified in this PR" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Result: ${{ steps.check.outputs.changed_directories }}" >> $GITHUB_STEP_SUMMARY
+          fi

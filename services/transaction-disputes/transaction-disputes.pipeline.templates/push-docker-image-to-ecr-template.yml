@@ -1,0 +1,179 @@
+# push-docker-image-to-ecr-template.yml
+# push-docker-image-to-ecr-template configuration
+
+parameters:
+- name: CONTAINER_ARTIFACT_NAME
+  type: string
+- name: AWS_REGION
+  type: string
+- name: ECR_IMAGE_NAME
+  type: string
+  # Optional docker tag the image will be published with. If not provided, Build.BuildNumber will be used as the image tag
+- name: ECR_IMAGE_TAG
+  type: string
+  default: ''
+- name: ECR_URL
+  type: string
+- name: ENVIRONMENT_NAME
+  type: string
+  values:
+  - Test
+  - Stage
+  - Prod
+  - Stage DR
+  - Prod DR
+- name: AGENT_POOL_NAME
+  type: string
+- name: ADO_ENVIRONMENT_NAME
+  type: string
+  values:
+  - Service-Test-Env
+  - Service-Stage-Env
+  - Service-Prod-Env
+- name: DEPENDENT_JOB_NAME
+  type: string
+- name: JOB_NAME
+  type: string
+
+jobs:
+- deployment: '${{ parameters.JOB_NAME }}'
+  displayName: "Push application Docker image to ECR in ${{ parameters.ENVIRONMENT_NAME }} environment"
+  workspace:
+    clean: all
+  variables:
+    buildContainerName: '$(Build.BuildNumber)_build_container'
+    buildContainerDockerImageFolderName: 'dockerimage'
+    dockerExportFileName: 'image.tar'
+    dockerCompressedFileName: 'image.tar.gz'
+    ${{ if eq(parameters.ECR_IMAGE_TAG, '') }}:
+      ecrImageTag: $(Build.BuildNumber)
+    ${{ else }}:
+      ecrImageTag: ${{ parameters.ECR_IMAGE_TAG }}
+
+  dependsOn:  ${{ parameters.DEPENDENT_JOB_NAME }}
+  # GitHub Environment — enables deployment protection rules and secrets scoping
+  environment: ${{ parameters.ADO_ENVIRONMENT_NAME }}
+  pool:
+    name: ${{ parameters.AGENT_POOL_NAME }}
+
+  strategy:
+    runOnce:
+      deploy:
+        steps:
+        - checkout: self
+          clean: true
+          displayName: 'Checkout the source repository'
+
+        - task: Docker@0
+          inputs:
+            containerregistrytype: Container Registry
+            action: Run a Docker command
+            customCommand: image build -t $(buildContainerName):$(Build.BuildNumber) --label "$(Build.BuildNumber)" -f payment-service.pipeline.templates/BuildContainer_Dockerfile payment-service.pipeline.templates
+          displayName: Build Docker Image
+          enabled: true
+
+        - task: Docker@0
+          inputs:
+            containerregistrytype: Container Registry
+            action: Run a Docker command
+            customCommand: run --privileged -id --name $(buildContainerName) $(buildContainerName):$(Build.BuildNumber)
+          displayName: Run the container using the Docker Image
+          enabled: true
+
+        - task: Docker@0
+          inputs:
+            containerregistrytype: Container Registry
+            action: Run a Docker command
+            customCommand:  exec --privileged $(buildContainerName) /bin/sh -c "aws ecr describe-repositories --region ${{ parameters.AWS_REGION }} --repository-names ${{ parameters.ECR_IMAGE_NAME }} || aws ecr create-repository --region ${{ parameters.AWS_REGION }} --repository-name ${{ parameters.ECR_IMAGE_NAME }} --image-scanning-configuration scanOnPush=true"
+          displayName: Ensure that Repository exists in ECR
+          enabled: true
+
+        - bash: |
+            sleep 30s
+          displayName: Sleep to let Docker service start
+          enabled: true
+
+        - task: DownloadBuildArtifacts@0
+          inputs:
+            buildType: 'current'
+            downloadType: 'single'
+            artifactName: ${{ parameters.CONTAINER_ARTIFACT_NAME }}
+            downloadPath: '$(System.ArtifactsDirectory)'
+          displayName: Download Artifact for Docker Image File
+          enabled: true
+
+        - task: ExtractFiles@1
+          inputs:
+            archiveFilePatterns: '$(System.ArtifactsDirectory)/${{ parameters.CONTAINER_ARTIFACT_NAME }}/$(dockerCompressedFileName)'
+            destinationFolder: '$(System.ArtifactsDirectory)/${{ parameters.CONTAINER_ARTIFACT_NAME }}/'
+            cleanDestinationFolder: false
+          displayName: Decompress Docker Image File
+          enabled: true
+
+        - bash: |
+            rm $(System.ArtifactsDirectory)/${{ parameters.CONTAINER_ARTIFACT_NAME }}/$(dockerCompressedFileName)
+          displayName: Remove compressed Docker Image file
+          enabled: true
+
+        - task: Docker@0
+          inputs:
+            containerregistrytype: Container Registry
+            action: Run a Docker command
+            customCommand: cp $(System.ArtifactsDirectory)/${{ parameters.CONTAINER_ARTIFACT_NAME }} $(buildContainerName):/$(buildContainerDockerImageFolderName)
+          displayName: Copy Docker Image file into build container
+          enabled: true
+
+        - bash: |
+            rm $(System.ArtifactsDirectory)/${{ parameters.CONTAINER_ARTIFACT_NAME }}/$(dockerExportFileName)
+          displayName: Remove un-compressed Docker Image file
+          enabled: true
+
+        - task: Docker@0
+          inputs:
+            containerregistrytype: Container Registry
+            action: Run a Docker command
+            customCommand: exec --privileged -w /$(buildContainerDockerImageFolderName) $(buildContainerName) docker load --input $(dockerExportFileName)
+          displayName: Load docker image from artifact
+          enabled: true
+
+        - task: Docker@0
+          inputs:
+            containerregistrytype: Container Registry
+            action: Run a Docker command
+            customCommand: exec --privileged -w /$(buildContainerDockerImageFolderName) $(buildContainerName) docker tag ${{ parameters.ECR_IMAGE_NAME }}:$(ecrImageTag) ${{ parameters.ECR_URL }}/${{ parameters.ECR_IMAGE_NAME }}:$(ecrImageTag)
+          displayName: Re-tag docker image
+          enabled: true
+
+        - task: Docker@0
+          inputs:
+            containerregistrytype: Container Registry
+            action: Run a Docker command
+            customCommand: 'exec --privileged $(buildContainerName) /bin/sh -c "aws ecr get-login-password --region ${{ parameters.AWS_REGION }} | docker login --username AWS --password-stdin ${{ parameters.ECR_URL }}"'
+          displayName: Get Elastic Container Registry Credentials
+          enabled: true
+
+        - task: Docker@0
+          inputs:
+            containerregistrytype: Container Registry
+            action: Run a Docker command
+            customCommand:  exec --privileged $(buildContainerName) docker image push ${{ parameters.ECR_URL }}/${{ parameters.ECR_IMAGE_NAME }}:$(ecrImageTag)
+          displayName: Push image to Elastic Container Registry
+          enabled: true
+
+        - task: Docker@0
+          condition: always()
+          inputs:
+            containerregistrytype: Container Registry
+            action: Run a Docker command
+            customCommand: stop $(buildContainerName)
+          displayName: Stop build container
+          enabled: true
+
+        - task: Docker@0
+          condition: always()
+          inputs:
+            containerregistrytype: Container Registry
+            action: Run a Docker command
+            customCommand: rm --force $(buildContainerName)
+          displayName: Remove build container
+          enabled: true

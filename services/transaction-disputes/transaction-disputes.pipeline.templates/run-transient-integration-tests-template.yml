@@ -1,0 +1,77 @@
+# Note: This template differs from the run-specflow-tests-template.yml in that all external dependencies are
+# spun up using docker-compose rather than connecting to real services.
+# This is to allow the integration tests to be run in a transient environment which can be created and destroyed on demand
+
+parameters:
+- name: AGENT_POOL_NAME
+  type: string
+  default: 'Linux-Build'
+- name: JOB_NAME
+  type: string
+- name: APPLICATION_PROJECT_NAME
+  type: string
+- name: TEST_CONTAINER_NAME
+  type: string
+  default: 'integration-tests'
+- name: TEST_RESULTS_ARTIFACT_NAME
+  type: string
+
+jobs:
+  - job: '${{ parameters.JOB_NAME }}'
+    displayName: 'Integration Test ${{ parameters.APPLICATION_PROJECT_NAME }}'
+    pool:
+      name: '${{ parameters.AGENT_POOL_NAME }}'
+    workspace:
+      clean: all
+
+    steps:
+      - checkout: self
+        clean: true
+        displayName: 'Checkout the source repository'
+
+      - bash: |
+          echo "Setting execute permissions on scripts"
+          chmod +x docker/scripts/*.sh
+        displayName: 'Set file permissions'
+
+      - task: DockerCompose@1
+        displayName: 'Build integration test image'
+        inputs:
+          containerregistrytype: Container Registry
+          dockerComposeFile: "${{ parameters.APPLICATION_PROJECT_NAME }}/docker-compose-integration-tests.yml"
+          action: 'Build services'
+          projectName: payment-service
+
+      - task: DockerCompose@1
+        displayName: 'Run integration test container'
+        inputs:
+          containerregistrytype: Container Registry
+          dockerComposeFile: "${{ parameters.APPLICATION_PROJECT_NAME }}/docker-compose-integration-tests.yml"
+          dockerComposeCommand: up --abort-on-container-exit --exit-code-from integration-tests
+          projectName: payment-service
+
+      - task: Docker@0
+        displayName: 'Copy test results from integration test container'
+        condition: succeededOrFailed()
+        inputs:
+          containerregistrytype: Container Registry
+          action: Run a Docker command
+          customCommand: 'cp ${{ parameters.TEST_CONTAINER_NAME }}:/src/payment-service.integration.tests/TestResults/. $(System.ArtifactsDirectory)/IntegrationTestResults'
+          continueOnError: true
+
+      - task: PublishPipelineArtifact@1
+        condition: succeededOrFailed()
+        inputs:
+          path: $(System.ArtifactsDirectory)/IntegrationTestResults
+          artifactName: ${{ parameters.TEST_RESULTS_ARTIFACT_NAME }}
+          displayName: Publish test artifacts
+          enabled: true
+
+      - task: DockerCompose@1
+        displayName: 'Tear down integration test containers'
+        condition: always()
+        inputs:
+          containerregistrytype: Container Registry
+          dockerComposeFile: "${{ parameters.APPLICATION_PROJECT_NAME }}/docker-compose-integration-tests.yml"
+          dockerComposeCommand: down
+          projectName: payment-service

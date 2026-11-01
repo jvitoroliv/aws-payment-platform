@@ -1,0 +1,123 @@
+# publish-web-application-assets.yml — publish-web-application-assets configuration
+
+# publish-web-application-assets.yml — publish-web-application-assets configuration
+
+parameters:
+- name: JOB_NAME
+  type: string
+- name: PROJECT_PATH
+  type: string
+- name: AGENT_POOL_NAME
+  type: string
+- name: DEPENDENT_JOB_NAME
+  type: string
+- name: PROJECT_APP_SETTINGS_PATH
+  type: string
+- name: WEB_APPLICATION_ASSETS_ARTIFACT_NAME
+  type: string
+
+jobs:
+- job: '${{ parameters.JOB_NAME }}'
+  displayName: "Publish web application assets"
+  dependsOn:  ${{ parameters.DEPENDENT_JOB_NAME }}
+  workspace:
+    clean: all
+  variables:
+    buildContainerName: '$(Build.BuildNumber)_build_container'
+    buildContainerSourceFolderName: 'src'
+    webApplicationAssetsPublishFolderName: 'publish'
+    webApplicationAssetsCompressedFileName: 'web_application.zip'
+    Application.Version: $(Build.BuildNumber)
+  pool:
+    name:  ${{ parameters.AGENT_POOL_NAME }}
+
+  steps:
+  - checkout: self
+    clean: true
+    displayName: 'Checkout the source repository'
+
+  # This will use the matching variable above "Application.Version" to update the same json value in the specified target file(s)
+  - task: FileTransform@1
+    inputs:
+      folderPath: '$(System.DefaultWorkingDirectory)/${{ parameters.PROJECT_PATH }}/${{ parameters.PROJECT_APP_SETTINGS_PATH }}'
+      fileType: json
+      targetFiles: appsettings.json
+    displayName: Update Application.Version in appsettings.json
+    enabled: true
+
+  - task: Docker@0
+    inputs:
+      containerregistrytype: Container Registry
+      action: Run a Docker command
+      customCommand: image build -t $(buildContainerName) --label "$(Build.BuildNumber)" -f payment-service.pipeline.templates/BuildContainer_Dockerfile payment-service.pipeline.templates
+    displayName: Create build container
+    enabled: true
+
+  - task: Docker@0
+    inputs:
+      containerregistrytype: Container Registry
+      action: Run a Docker command
+      customCommand: run --privileged -id --name $(buildContainerName) $(buildContainerName)
+    displayName: Run the build container
+    enabled: true
+
+  - task: Docker@0
+    inputs:
+      containerregistrytype: Container Registry
+      action: Run a Docker command
+      customCommand: cp $(System.DefaultWorkingDirectory) $(buildContainerName):/$(buildContainerSourceFolderName)
+    displayName: Copy source code to build container
+    enabled: true
+
+  - task: Docker@0
+    inputs:
+      containerregistrytype: Container Registry
+      action: Run a Docker command
+      customCommand: 'exec --privileged -w /$(buildContainerSourceFolderName)/${{ parameters.PROJECT_PATH }} $(buildContainerName) dotnet publish -c Release -r linux-x64 -o /$(buildContainerSourceFolderName)/${{ parameters.PROJECT_PATH }}/$(webApplicationAssetsPublishFolderName)'
+    displayName: Generate published web application assets for ${{ parameters.PROJECT_PATH }}
+    enabled: true
+
+  - task: Docker@0
+    inputs:
+      containerregistrytype: Container Registry
+      action: Run a Docker command
+      customCommand: cp $(buildContainerName):/$(buildContainerSourceFolderName)/${{ parameters.PROJECT_PATH }}/publish/ ${{ parameters.PROJECT_PATH }}/$(webApplicationAssetsPublishFolderName)
+    displayName: Copy published web application assets to agent host
+    enabled: true
+
+  - task: ArchiveFiles@1
+    inputs:
+      rootFolder: $(System.DefaultWorkingDirectory)/${{ parameters.PROJECT_PATH }}/$(webApplicationAssetsPublishFolderName)
+      includeRootFolder: false
+      archiveType: 'zip'
+      archiveFile: $(System.DefaultWorkingDirectory)/${{ parameters.PROJECT_PATH }}/$(webApplicationAssetsCompressedFileName)
+    displayName: Compress web application assets 
+    enabled: true
+
+  - task: PublishBuildArtifacts@1
+    inputs:
+      PathtoPublish: '$(System.DefaultWorkingDirectory)/${{ parameters.PROJECT_PATH }}/$(webApplicationAssetsCompressedFileName)'
+      ArtifactName: '${{ parameters.WEB_APPLICATION_ASSETS_ARTIFACT_NAME }}'
+    displayName: Publish web application assets to CI server
+    enabled: true
+
+  - bash: |
+      rm $(System.DefaultWorkingDirectory)/${{ parameters.PROJECT_PATH }}/$(webApplicationAssetsCompressedFileName)
+    displayName: Remove compressed web application assets file
+    enabled: true
+
+  - task: Docker@0
+    condition: always()
+    inputs:
+      containerregistrytype: Container Registry
+      action: Run a Docker command
+      customCommand: stop $(buildContainerName)
+    displayName: Stop build container
+
+  - task: Docker@0
+    condition: always()
+    inputs:
+      containerregistrytype: Container Registry
+      action: Run a Docker command
+      customCommand: rm --force $(buildContainerName)
+    displayName: Remove build container

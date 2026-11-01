@@ -1,0 +1,54 @@
+[
+  {
+    "name": "${container_name}",
+    "image": "${image}",
+    "portMappings": [
+      {
+        "containerPort": 3000,
+        "hostPort": 3000
+      }
+    ],
+    "cpu": ${cpu},
+    "memory": ${memory},
+    "networkMode": "awsvpc",
+    "essential": true,
+    "logConfiguration": {
+      "logDriver": "awslogs",
+      "options": {
+        "awslogs-group": "${log_group}",
+        "awslogs-region": "${region}",
+        "awslogs-stream-prefix": "support-tool-api"
+      }
+    },
+    "environment": [
+    ],
+    "dependsOn": [
+    {
+      "containerName": "datadog",
+      "condition": "START"
+    }
+  ]
+  },
+  {
+    "name": "datadog",
+    "image": "${datadog_image}",
+    "cpu": 256,
+    "memory": 512,
+    "essential": true,
+    "portMappings": [
+      {
+        "protocol": "udp",
+        "containerPort": 8125,
+        "hostPort": 8125
+      }
+    ],
+    "environment": [
+      {	"name": "ECS_FARGATE"      , "value": "true" },
+      { "name": "environment"      , "value": "${environment}" },
+      { "name": "DD_DOGSTATSD_NON_LOCAL_TRAFFIC", "value": "true" },
+      { "name": "DD_DOGSTATSD_TAGS", "value": "[\"environment:${environment}\", \"fargate:true\"]" },
+      { "name": "DD_TAGS"          , "value": "environment:${environment} fargate:true" },
+      { "name": "DD_API_KEY"       , "value": "${dd_api_key}" }
+    ]
+  }
+]

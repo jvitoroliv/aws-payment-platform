@@ -1,0 +1,74 @@
+{
+  "run": {
+    "tests": true,
+    "skip-dirs": ["vendor", "github.com/example-org/ps-tag-log"],
+    "skip-files": [".*ps-tag-log/log.*"]
+  },
+  "linters-settings": {
+    "govet": {
+      "disable": ["composites"]
+    }
+  },
+  "linters": {
+    "enable": ["unconvert", "goimports", "gosec"],
+    "disable": ["unused", "errcheck"]
+  },
+  "issues": {
+    "max-same-issues": 0,
+    "max-issues-per-linter": 0,
+    "exclude-rules": [
+      {
+        "linters": ["all"],
+        "text": "ps-tag-log/log"
+      },
+      {
+        "linters": ["staticcheck"],
+        "text": "SA9004:"
+      },
+      {
+        "linters": ["staticcheck"],
+        "text": "SA5001:"
+      },
+      {
+        "linters": ["staticcheck"],
+        "text": "SA5011:"
+      },
+      {
+        "linters": ["gosec"],
+        "text": "G203:"
+      },
+      {
+        "linters": ["gosec"],
+        "text": "G101:"
+      },
+      {
+        "linters": ["gosec"],
+        "text": "G102:"
+      },
+      {
+        "linters": ["gosec"],
+        "text": "G106:"
+      },
+      {
+        "linters": ["gosec"],
+        "text": "401:"
+      },
+      {
+        "linters": ["gosec"],
+        "text": "402:"
+      },
+      {
+        "linters": ["gosec"],
+        "text": "404:"
+      },
+      {
+        "linters": ["gosec"],
+        "text": "502:"
+      },
+      {
+        "linters": ["govet"],
+        "text": "copylocks:"
+      }
+    ]
+  }
+}

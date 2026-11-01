@@ -1,0 +1,91 @@
+#!groovy
+
+properties(
+        [
+                parameters([
+                        choice(choices: ["dev", "test", "stage", "prod"].join("\n"),
+                                description: 'environment',
+                                name: 'ENVIRONMENT')
+                ]),
+                ([
+                        $class       : 'DatadogJobProperty',
+                        tagProperties: "jenkins.job.duration,jenkins.job.status"
+                ])
+        ]
+)
+
+disableConcurrentBuilds()
+
+node("${params.ENVIRONMENT}") {
+    stage('Prep') {
+        buildName "${env.BUILD_NUMBER}) ${params.ENVIRONMENT}"
+        buildDescription "${params.ENVIRONMENT}"
+        env.AWS_DEFAULT_REGION = "us-east-1"
+        cleanWs()
+    }
+
+    Exception buildError // error to send to slack
+    ansiColor('xterm') {
+        try {
+            checkout scm
+
+            def tfContainer = docker.image("hashicorp/terraform:1.6.5")
+            tfContainer.inside("-e TF_VAR_environment=${params.ENVIRONMENT} --entrypoint=''") {
+
+                stage("Plan Shared") {
+                    echo "US EAST"
+                    dir("terraform") {
+                        sh "terraform init -reconfigure -backend-config=../environments/${params.ENVIRONMENT}/us-east-1/${params.ENVIRONMENT}.backend"
+                        sh "terraform plan --var-file=../environments/${params.ENVIRONMENT}/us-east-1/${params.ENVIRONMENT}.tfvars -out=${params.ENVIRONMENT}_us-east-1.planfile"
+                    }
+
+                    echo "US WEST"
+                    dir("terraform") {
+                        sh "terraform init -reconfigure -backend-config=../environments/${params.ENVIRONMENT}/us-west-2/${params.ENVIRONMENT}.backend"
+                        sh "terraform plan  --var-file=../environments/${params.ENVIRONMENT}/us-west-2/${params.ENVIRONMENT}.tfvars -out=${params.ENVIRONMENT}_us-west-2.planfile"
+                    }
+                }
+
+                stage("Get User Input") {
+                    if (params.ENVIRONMENT == 'stage' || params.ENVIRONMENT == 'prod') {
+                        userInputProceed(params.ENVIRONMENT)
+                    }
+                }
+
+                stage("Apply Shared") {
+                    echo "US EAST"
+                    dir("terraform") {
+                        sh "terraform init -reconfigure -backend-config=../environments/${params.ENVIRONMENT}/us-east-1/${params.ENVIRONMENT}.backend"
+                        sh "terraform apply -auto-approve ${params.ENVIRONMENT}_us-east-1.planfile"
+                    }
+
+                    echo "US WEST"
+                    dir("terraform") {
+                        sh "terraform init -reconfigure -backend-config=../environments/${params.ENVIRONMENT}/us-west-2/${params.ENVIRONMENT}.backend"
+                        sh "terraform apply -auto-approve ${params.ENVIRONMENT}_us-west-2.planfile"
+                    }
+                }
+            }
+        } catch (Exception e) {
+            currentBuild.result = 'FAILURE'
+            println e.toString()
+            buildError = e// error to send to slack
+        } finally {
+            notifyGoogle(currentBuild.result, "Terraform-Shared Deployment Build")
+        }
+    }
+}
+
+def userInputProceed(environment) {
+    def proceed = false
+    timeout(time: 1, unit: 'HOURS') {
+        proceed = input(
+                id: "${environment}", message: 'Do you approve?', parameters: [
+                [$class: 'BooleanParameterDefinition', defaultValue: true, description: '', name: 'Please confirm']
+        ])
+    }
+
+    if(!proceed) {
+        error "User decided not to proceed"
+    }
+}

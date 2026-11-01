@@ -1,0 +1,53 @@
+# dacpac-generator.yaml
+# dacpac-generator configuration
+
+name: dacpac-generator
+on:
+  workflow_dispatch:
+concurrency:
+  group: '${{ github.workflow }}-${{ github.ref }}'
+  cancel-in-progress: true
+env:
+  DatabasePath: 'src/Database'
+  OutPath: '${{ github.workspace }}\DatabaseProject\'
+  RootPath: '${{ github.workspace }}\src\'
+  GeneratorPath: '${{ github.workspace }}\src\Database\Scripts\CoreService\PreSchema'
+jobs:
+  dacpac_generator:
+    runs-on: coreplatform-windows-dev
+    steps:
+      - name: Checkout Branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+      - name: Add msbuild to PATH
+        uses: microsoft/setup-msbuild@v2
+      - name: Read VERSION file
+        id: encversion
+        run: echo "::set-output name=version::$(cat ${{ github.workspace }}\_CoreServiceVersion.txt)"
+      - name: Echo Version
+        run: echo "CoreService Current Branch Version - ${{ steps.encversion.outputs.version }}"
+      - name: Install .NET Developer Pack
+        run: |
+          choco install netfx-4.6.1-devpack --no-progress
+      - name: Build Dacpac Files
+        shell: pwsh
+        run: |
+          msbuild.exe ${{ env.DatabasePath }}/DatabaseProjects/DatabaseProjects.sln -nologo -target:Build /p:OutputPath=${{ env.OutPath }} /p:Configuration=Release;
+      - name: setup git config
+        shell: pwsh
+        run: |
+          git config user.name "GitHub Actions Bot"
+          git config user.email "actions@github.com"
+      - name: commit
+        shell: pwsh
+        run: |
+          cp "${{ env.OutPath }}CoreService.dacpac" -Destination "${{ env.RootPath }}Database\Scripts\CoreService\dacpac\${{ steps.encversion.outputs.version }}.dacpac"
+          cp "${{ env.OutPath }}TaskManagement.dacpac" -Destination "${{ env.RootPath }}Database\Scripts\TaskManagement\dacpac\TaskManagement.dacpac"
+          cp "${{ env.OutPath }}CorePlatform_Archive.dacpac" -Destination "${{ env.RootPath }}Database\Scripts\CorePlatform_Archive\dacpac\CorePlatform_Archive.dacpac"
+          Remove-Item ${{ env.OutPath}}*
+          git add '*${{steps.encversion.outputs.version}}.dacpac'
+          git add '*TaskManagement.dacpac'
+          git add '*CorePlatform_Archive.dacpac'
+          git commit -m "Database Updates" -v
+          git push

@@ -1,0 +1,200 @@
+# compile-coreplatform.yaml
+# compile-coreplatform configuration
+# Maintained by: Platform Engineering
+
+# compile-coreplatform.yaml — compile-coreplatform configuration
+
+name: compile-coreplatform
+on:
+  pull_request:
+    types: [opened, synchronize]
+concurrency:
+  group: '${{ github.workflow }}-${{ github.ref }}-coreplatform-dev-ue1'
+  cancel-in-progress: false
+env:
+  filepostfix: '${{ github.run_id }}_${{ github.run_attempt }}'
+jobs:
+  check-paths:
+    outputs:
+      run_transform: ${{ steps.path_filter.outputs.transform_files }}
+      run_compile: ${{ steps.path_filter.outputs.src_files }}
+    runs-on: coreplatform-windows-dev
+    steps:
+    - name: Checkout Branch
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.ref }}
+    - name: Filter changed paths
+      id: path_filter
+      uses: dorny/paths-filter@v3.0.2
+      with:
+        filters: |
+          transform_files:
+            - '**.aocxdt'
+            - '**.config'
+          src_files:
+            - 'src/**'
+            - '**.proj'
+            - '**.targets'
+            - '**.cmd'
+            - '**.xml'
+            - '**.ps1'
+
+  codebuild_coreplatform:
+    needs: check-paths
+    if: ${{ needs.check-paths.outputs.run_compile == 'true' && github.triggering_actor != 'fabric-auto-update-app[bot]' }}
+    runs-on: coreplatform-windows-dev
+    steps:
+      - name: Checkout Branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}        
+      - name: Compile CoreService
+        run: |
+          & "C:\Program Files\Microsoft Visual Studio\2022\Professional\Msbuild\Current\Bin\msbuild.exe" Compile.proj -target:CoreService /p:configuration="Release" /p:platform="Any CPU" -maxcpucount | Out-File -FilePath compile_coreplatform_out_${{ env.filepostfix }}.txt -Encoding utf8
+      - name: 'Upload compile_coreplatform_out_${{ env.filepostfix }}.txt artifact'
+        uses: actions/upload-artifact@v4
+        with:
+          name: compile_coreplatform_out_${{ env.filepostfix }}
+          path: compile_coreplatform_out_${{ env.filepostfix }}.txt
+          retention-days: 3
+        if: ${{ !cancelled() }} # Always upload the artifact, even if the build step fails
+      - name: Compile Warnings
+        id: compile_warnings
+        if: ${{ steps.compile_coreplatform.outcome == 'success' }} # Run only if Compile CoreService succeeds
+        run: |
+          $content = Get-Content compile_coreplatform_out_${{ env.filepostfix }}.txt -Raw
+          $warnings = [regex]::Matches($content, '\d+(?= Warning\(s\))').Value
+          echo "WARNING_COUNT=$warnings" >> $env:GITHUB_ENV
+      - name: Quality Check
+        if: ${{ steps.compile_coreplatform.outcome == 'success' && env.WARNING_COUNT > 6 }} # Run only if Compile CoreService succeeds and warnings exceed threshold
+        run: |
+          echo "Warnings exceed threshold - ${{ env.WARNING_COUNT }} warnings"
+          exit 1
+
+  codebuild_database:
+    needs: check-paths
+    if: ${{ needs.check-paths.outputs.run_compile == 'true' && github.triggering_actor != 'fabric-auto-update-app[bot]' }}
+    runs-on: coreplatform-windows-dev
+    steps:
+      - name: Checkout Branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+      - name: Compile Database
+        run: |
+          & "C:\Program Files\Microsoft Visual Studio\2022\Professional\Msbuild\Current\Bin\msbuild.exe" Compile.proj -target:Databases /p:configuration="Release" /p:platform="Any CPU" -maxcpucount | Out-File -FilePath compile_database_out_${{ env.filepostfix }}.txt -Encoding utf8
+      - name: 'Upload compile_coreplatform_out_${{ env.filepostfix }}.txt artifact'
+        uses: actions/upload-artifact@v4
+        with:
+          name: compile_database_out_${{ env.filepostfix }}
+          path: compile_database_out_${{ env.filepostfix }}.txt
+          retention-days: 3
+        if: ${{ !cancelled() }} # Always upload the artifact, even if the build step fails
+      - name: Compile Warnings
+        id: compile_warnings
+        if: ${{ steps.compile_database.outcome == 'success' }} # Run only if Compile Database succeeds
+        run: |
+          $content = Get-Content compile_database_out_${{ env.filepostfix }}.txt -Raw
+          $warnings = [regex]::Matches($content, '\d+(?= Warning\(s\))').Value
+          echo "WARNING_COUNT=$warnings" >> $env:GITHUB_ENV
+      - name: Quality Check
+        if: ${{ steps.compile_database.outcome == 'success' && env.WARNING_COUNT > 6 }} # Run only if Compile Database succeeds and warnings exceed threshold
+        run: |
+          echo "Warnings exceed threshold - ${{ env.WARNING_COUNT }} warnings"
+          exit 1
+
+  codebuild_taskman:
+    needs: check-paths
+    if: ${{ needs.check-paths.outputs.run_compile == 'true' && github.triggering_actor != 'fabric-auto-update-app[bot]' }}
+    runs-on: coreplatform-windows-dev
+    steps:
+      - name: Checkout Branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+      - name: Compile Taskman
+        run: |
+          & "C:\Program Files\Microsoft Visual Studio\2022\Professional\Msbuild\Current\Bin\msbuild.exe" Compile.proj -target:Taskman /p:configuration="Release" /p:platform="Any CPU" -maxcpucount | Out-File -FilePath compile_taskman_out_${{ env.filepostfix }}.txt -Encoding utf8
+      - name: 'Upload compile_coreplatform_out_${{ github.run_id }}_${{ github.run_number }}.txt artifact'
+        uses: actions/upload-artifact@v4
+        with:
+          name: compile_taskman_out_${{ env.filepostfix }}
+          path: compile_taskman_out_${{ env.filepostfix }}.txt
+          retention-days: 3
+        if: ${{ !cancelled() }} # Always upload the artifact, even if the build step fails
+      - name: Compile Warnings
+        id: compile_warnings
+        if: ${{ steps.compile_taskman.outcome == 'success' }} # Run only if Compile Database succeeds
+        run: |
+          $content = Get-Content compile_taskman_out_${{ env.filepostfix }}.txt -Raw
+          $warnings = [regex]::Matches($content, '\d+(?= Warning\(s\))').Value
+          echo "WARNING_COUNT=$warnings" >> $env:GITHUB_ENV
+      - name: Quality Check
+        if: ${{ steps.compile_taskman.outcome == 'success' && env.WARNING_COUNT > 6 }} # Run only if Compile Taskman succeeds and warnings exceed threshold
+        run: |
+          echo "Warnings exceed threshold - ${{ env.WARNING_COUNT }} warnings"
+          exit 1
+
+  test_transforms:
+    needs: check-paths
+    if: ${{ needs.check-paths.outputs.run_transform == 'true' && github.triggering_actor != 'fabric-auto-update-app[bot]' }}
+    runs-on: coreplatform-windows-dev
+    steps:
+      - name: Checkout Branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+      - name: Write aws creds file
+        run: |
+          $FullPathCredentialsFile = "${{ vars.AWS_CREDENTIALSFILEPATH }}\${{ vars.AWS_CREDENTIALSFILENAME }}"
+          if (!(Test-Path ${{ vars.AWS_CREDENTIALSFILEPATH }})) { 
+          New-Item -ItemType directory -Force -Path ${{ vars.AWS_CREDENTIALSFILEPATH }} -ErrorAction Stop | Out-Null
+          Write-Host "Directory Created."
+          }
+          Set-Content -Encoding ASCII -Path $FullPathCredentialsFile -Force -Value "[${{ vars.PLATFORM-SERVICESDEV_PROFILE_NAME }}]" -ErrorAction Stop
+          Add-Content $FullPathCredentialsFile "aws_access_key_id = ${{ secrets.PLATFORM-SERVICESDEV_AWS_ACCESS_KEY_ID }}" -Force -ErrorAction Stop
+          Add-Content $FullPathCredentialsFile "aws_secret_access_key = ${{ secrets.PLATFORM-SERVICESDEV_AWS_SECRET_ACCESS_KEY }}" -Force -ErrorAction Stop
+          Write-Host "$Profile created: ${{ vars.PLATFORM-SERVICESDEV_PROFILE_NAME }} ."
+          Add-Content $FullPathCredentialsFile "" -Force -ErrorAction Stop
+          Add-Content -Encoding ASCII -Path $FullPathCredentialsFile -Force -Value "[${{ vars.PLATFORM-SERVICESTEST_PROFILE_NAME }}]" -ErrorAction Stop
+          Add-Content $FullPathCredentialsFile "aws_access_key_id = ${{ secrets.PLATFORM-SERVICESTEST_AWS_ACCESS_KEY_ID }}" -Force -ErrorAction Stop
+          Add-Content $FullPathCredentialsFile "aws_secret_access_key = ${{ secrets.PLATFORM-SERVICESTEST_AWS_SECRET_ACCESS_KEY }}" -Force -ErrorAction Stop
+          Write-Host "$Profile created: ${{ vars.PLATFORM-SERVICESTEST_PROFILE_NAME }} ."
+          Add-Content $FullPathCredentialsFile "" -Force -ErrorAction Stop
+          Add-Content -Encoding ASCII -Path $FullPathCredentialsFile -Force -Value "[${{ vars.PLATFORM-SERVICESDEMO_PROFILE_NAME }}]" -ErrorAction Stop
+          Add-Content $FullPathCredentialsFile "aws_access_key_id = ${{ secrets.PLATFORM-SERVICESDEMO_AWS_ACCESS_KEY_ID }}" -Force -ErrorAction Stop
+          Add-Content $FullPathCredentialsFile "aws_secret_access_key = ${{ secrets.PLATFORM-SERVICESDEMO_AWS_SECRET_ACCESS_KEY }}" -Force -ErrorAction Stop
+          Write-Host "$Profile created: ${{ vars.PLATFORM-SERVICESDEMO_PROFILE_NAME }} ."
+          Add-Content $FullPathCredentialsFile "" -Force -ErrorAction Stop
+          Add-Content -Encoding ASCII -Path $FullPathCredentialsFile -Force -Value "[${{ vars.PLATFORM-SERVICESPROD_PROFILE_NAME }}]" -ErrorAction Stop
+          Add-Content $FullPathCredentialsFile "aws_access_key_id = ${{ secrets.PLATFORM-SERVICESPROD_AWS_ACCESS_KEY_ID }}" -Force -ErrorAction Stop
+          Add-Content $FullPathCredentialsFile "aws_secret_access_key = ${{ secrets.PLATFORM-SERVICESPROD_AWS_SECRET_ACCESS_KEY }}" -Force -ErrorAction Stop
+          Write-Host "$Profile created: ${{ vars.PLATFORM-SERVICESPROD_PROFILE_NAME }} ."
+          Add-Content $FullPathCredentialsFile "" -Force -ErrorAction Stop
+          Add-Content -Encoding ASCII -Path $FullPathCredentialsFile -Force -Value "[${{ vars.PLATFORM-SERVICESREALDEMO_PROFILE_NAME }}]" -ErrorAction Stop
+          Add-Content $FullPathCredentialsFile "aws_access_key_id = ${{ secrets.PLATFORM-SERVICESREALDEMO_AWS_ACCESS_KEY_ID }}" -Force -ErrorAction Stop
+          Add-Content $FullPathCredentialsFile "aws_secret_access_key = ${{ secrets.PLATFORM-SERVICESREALDEMO_AWS_SECRET_ACCESS_KEY }}" -Force -ErrorAction Stop
+          Write-Host "$Profile created: ${{ vars.PLATFORM-SERVICESREALDEMO_PROFILE_NAME }} ."
+      - name: Compile TestTransforms
+        run: |
+          & "C:\Program Files\Microsoft Visual Studio\2022\Professional\Msbuild\Current\Bin\msbuild.exe" TestTransforms.proj /p:configuration="Release" /p:platform="Any CPU" -maxcpucount | Out-File -FilePath compile_tests_out_${{ env.filepostfix }}.txt -Encoding utf8
+      - name: 'Upload compile_coreplatform_out_${{ env.filepostfix }}.txt artifact'
+        uses: actions/upload-artifact@v4
+        with:
+          name: compile_tests_out_${{ env.filepostfix }}
+          path: compile_tests_out_${{ env.filepostfix }}.txt
+          retention-days: 3
+        if: ${{ !cancelled() }} # Always upload the artifact, even if the build step fails
+      - name: Compile Warnings
+        id: compile_warnings
+        if: ${{ steps.compile_testtransforms.outcome == 'success' }} # Run only if Compile Database succeeds
+        run: |
+          $content = Get-Content compile_tests_out_${{ env.filepostfix }}.txt -Raw
+          $warnings = [regex]::Matches($content, '\d+(?= Warning\(s\))').Value
+          echo "WARNING_COUNT=$warnings" >> $env:GITHUB_ENV
+      - name: Quality Check
+        if: ${{ steps.compile_testtransforms.outcome == 'success' && env.WARNING_COUNT > 6 }} # Run only if Compile TestTransforms succeeds and warnings exceed threshold
+        run: |
+          echo "Warnings exceed threshold - ${{ env.WARNING_COUNT }} warnings"
+          exit 1

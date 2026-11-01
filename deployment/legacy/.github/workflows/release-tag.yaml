@@ -1,0 +1,43 @@
+# release-tag.yaml
+# release-tag configuration
+
+name: release-tag
+on:
+  workflow_dispatch:  
+    inputs:
+      envShortname:
+        description: 'Short name of environment to tag'
+        type: string
+        required: false
+        default: 'STAG'
+      releaseSha:
+        description: 'SHA for the commit that is being release tagged'
+        type: string
+        required: true
+concurrency:
+  group: release-tag
+  cancel-in-progress: true
+
+jobs:
+  release_tag:
+    runs-on: coreplatform-dev
+    steps:
+      - name: Checkout Branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+      - name: Create Release Tag
+        run: |
+          version="$(cat ${{ github.workspace }}/_CoreServiceVersion.txt)"
+          echo -n "$version" >> version.txt
+          truncate -s -1 version.txt
+          shortname="${{ inputs.envShortname }}"
+          tag="$(cat version.txt)-$shortname"
+          echo "$tag" >> tag.txt
+      - name: Tag Commit
+        run: |
+          TAG_NAME=$(cat tag.txt) # replace with your tag name
+          git tag -d $TAG_NAME || true # delete tag if exists locally
+          git push origin --delete $TAG_NAME || true # delete tag if exists remotely
+          git tag $TAG_NAME
+          git push origin $TAG_NAME

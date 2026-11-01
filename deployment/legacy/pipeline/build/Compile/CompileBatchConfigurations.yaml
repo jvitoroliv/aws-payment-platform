@@ -1,0 +1,48 @@
+# CompileBatchConfigurations.yaml
+# CompileBatchConfigurations configuration
+
+trigger:
+  branches:
+    include:
+    - Major
+  paths:
+    include:
+    - src/Transforms
+    - src/Batches
+    
+schedules:
+- cron: '00 8 * * 1,2,3,4,5'
+  displayName: weekdays 8.00AM UTC
+  branches:
+    include:
+    - Major
+  always: true
+
+jobs:
+- job: Compile_Batch_Configurations_Job
+  displayName: Compile Batch Configurations Job
+  pool:
+    name: CpAWS-qa-finserv
+    demands: msbuild
+  workspace:
+    clean: all
+  steps:
+  - checkout: self
+  
+  - task: MSBuild@1
+    displayName: Compile Batch Configurations - QA
+    inputs:
+      solution: CompileBatchConfigurations.proj
+      msbuildVersion: 15.0
+      platform: Any CPU
+      configuration: Release
+      msbuildArguments: /p:environment=QA /p:machine=QA-DBTOOLS-01
+      
+  - task: MSBuild@1
+    displayName: Compile Batch Configurations - Staging
+    inputs:
+      solution: CompileBatchConfigurations.proj
+      msbuildVersion: 15.0
+      platform: Any CPU
+      configuration: Release
+      msbuildArguments: /p:environment=Staging /p:machine=ST-DBTOOLS-01

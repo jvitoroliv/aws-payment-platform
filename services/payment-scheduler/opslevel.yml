@@ -1,0 +1,34 @@
+# opslevel.yml
+# opslevel configuration
+
+---
+version: 1
+service:
+  name: TAG Payment Scheduler Service
+  lifecycle: pre-alpha
+  tier: tier_4
+  product: TAG
+  owner: tag
+  system: tag
+  language: golang
+  framework: other
+  description: Service responsible managing and scheduling payments
+  aliases:
+    - example-org/ps-tag-payment-scheduler
+  tags:
+  - key: containerized
+    value: yes
+  - key: pci
+    value: no
+  - key: scope
+    value: internal
+  - key: type
+    value: backend
+  repositories:
+  - name: example-org/ps-tag-payment-scheduler
+    path: "/"
+    provider: github
+  tools:
+  dependencies:
+  alert_sources:
+  properties:

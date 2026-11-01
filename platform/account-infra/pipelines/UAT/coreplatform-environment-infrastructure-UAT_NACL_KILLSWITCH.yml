@@ -1,0 +1,54 @@
+# 'Allow scripts to access the OAuth token' was selected in pipeline.  Add the following YAML to any steps requiring access:
+#       env:
+#           MY_ACCESS_TOKEN: $(System.AccessToken)
+# Variable 'Environment' was defined in the Variables tab
+parameters:
+- name: Environment
+  default: 'UAT_NACL_KILLSWITCH'
+trigger: none
+
+jobs:
+- job: Phase_1
+  displayName: Agent job 1
+  pool:
+    name: CpAWS-UAT
+  steps:
+  - checkout: self
+    clean: true
+    persistCredentials: True
+  - task: PowerShell@1
+    name: PowerShell4
+    displayName: Configure Git Client
+    inputs:
+      scriptType: inlineScript
+      inlineScript: 'git config --global http.extraheader "AUTHORIZATION: bearer $env:System_AccessToken"'
+  - task: CmdLine@1
+    name: CmdLine5
+    displayName: Terraform Init
+    inputs:
+      filename: terraform
+      arguments: init -input=false
+      workingFolder: env\$(Environment)
+  - task: CmdLine@1
+    name: CmdLine4
+    displayName: Terraform Plan
+    inputs:
+      filename: terraform
+      arguments: plan -out terraform.tfplan
+      workingFolder: env\$(Environment)
+  - task: CmdLine@1
+    name: CmdLine6
+    displayName: Terraform Apply
+    inputs:
+      filename: terraform
+      arguments: apply terraform.tfplan
+      workingFolder: env\$(Environment)
+  - task: PowerShell@1
+    name: PowerShell5
+    displayName: Clean Git Client
+    condition: always()
+    inputs:
+      scriptType: inlineScript
+      scriptName: git config --global --unset http.extraheader
+      inlineScript: git config --global --unset http.extraheader
+...

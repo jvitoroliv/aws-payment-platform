@@ -1,0 +1,88 @@
+#!groovy
+
+properties([
+        [
+                $class       : 'DatadogJobProperty',
+                tagProperties: 'jenkins.job.duration,jenkins.job.status'
+        ],
+        disableConcurrentBuilds()
+])
+
+node('dev') {
+    def COMPOSE_COMMAND
+    String credentialsId = 'jenkins-default-GitHub-Token-example-org'
+    stage('Prep') {
+        SCM_CHECKOUT = checkout scm
+
+        env.VERSION = "RC-${SCM_CHECKOUT.GIT_COMMIT}"
+
+        buildName "${env.BUILD_NUMBER}) ${env.VERSION}"
+
+        COMPOSE_COMMAND = "docker-compose -f docker-compose.yml -p ${env.VERSION}"
+        withDockerRegistry(credentialsId: 'tag-devops-cloud-artifactory-creds', url: 'https://registry.example.io/') {
+            sh "${COMPOSE_COMMAND} pull tester"
+            sh "${COMPOSE_COMMAND} up -d tester"
+        }
+    }
+
+    try {
+        ansiColor('xterm') {
+            stage('Download Dependencies') {
+                docker.image("golang:1.21.3").inside("-v ${env.WORKSPACE}/.mod:/go/pkg/mod -u root") {
+                    withCredentials([gitUsernamePassword(credentialsId: credentialsId, gitToolName: 'Default')]) {
+                        sh 'go mod download'
+                        sh 'go mod vendor'
+                    }
+                }
+            }
+
+            stage('Build Binary') {
+                sh "${COMPOSE_COMMAND} exec -T tester bash -c './build/compile.sh'"
+            }
+
+            stage("Docker Compose") {
+                withDockerRegistry(credentialsId: 'tag-devops-cloud-artifactory-creds', url: 'https://registry.example.io/') {
+                    // Pass in DOCKER_REGISTRY variable to get an image without the registry name to pass in pushContainerImage
+                    sh "DOCKER_REGISTRY='' ${COMPOSE_COMMAND} up --build -d"
+                }
+            }
+
+            stage('Go Unit Tests') {
+                sh "${COMPOSE_COMMAND} exec -T tester bash -c 'make test'"
+            }
+
+            stage('Go Integration Tests') {
+                sh "${COMPOSE_COMMAND} exec -T tester bash -c 'make integration-test'"
+            }
+
+            stage('Push Containers') {
+                pushContainerImage('company-producer', "${env.VERSION}")
+            }
+
+            stage('Deploy to DEV Environment') {
+                build(job: 'Deployment/ps-tag-company/main',
+                        propagate: true,
+                        wait: true,
+                        parameters: [
+                                string(name: 'VERSION', value: env.VERSION),
+                                string(name: 'REGION', value: 'us-east-1'),
+                                string(name: 'ENVIRONMENT', value: 'dev')
+                        ])
+            }
+        }
+    } catch (Exception e) {
+        currentBuild.result = 'FAILURE'
+        println e.toString()
+        notifyGoogle(
+                currentBuild.result,
+                "`${env.JOB_NAME}` \n `Env: dev` \n${env.BUILD_URL}"
+        )
+    } finally {
+        def logFile = "${env.CHANGE_BRANCH}-${env.BUILD_NUMBER}.log"
+        sh "${COMPOSE_COMMAND} logs > ${logFile}"
+        zip archive: true, glob: "${logFile}", zipFile: "${logFile}.zip"
+
+        sh "${COMPOSE_COMMAND} down"
+        notifyGoogle(currentBuild.result, 'Company Merge Build')
+    }
+}

@@ -1,0 +1,36 @@
+# opslevel.yml — opslevel configuration
+
+# opslevel.yml — opslevel configuration
+
+---
+version: 1
+service:
+  name: ps-tag-non-posted-exceptions
+  lifecycle: pre-alpha
+  tier: tier_4
+  product: The Product Name
+  owner: helios
+  system:
+  language: golang
+  framework: null
+  description: NPEs Kafka Producer - Reconciliation
+  aliases:
+    - example-org/ps-tag-non-posted-exceptions
+  tags:
+    - key: containerized
+      value: "yes"
+    - key: pci
+      value: "yes"
+    - key: pci
+      value: "true"
+    - key: scope
+      value: internal
+    - key: type
+      value: backend
+  repositories:
+    - name: example-org/ps-tag-non-posted-exceptions
+      path: "/"
+      provider: github
+  tools:
+  dependencies:
+  alert_sources:

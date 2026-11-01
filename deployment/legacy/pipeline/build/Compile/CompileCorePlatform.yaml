@@ -1,0 +1,80 @@
+# CompileCorePlatform.yaml
+# CompileCorePlatform configuration
+
+trigger:
+  branches:
+    include:
+    - Major
+    - Patch
+    - Prod
+    - Demo
+    - OnRamp
+  batch: True
+pr:
+  branches:
+    include:
+    - master
+    - main
+    - Major
+
+jobs:
+- job: codebuild_coreplatform
+  displayName: Compile CoreService
+  pool:
+    name: CoreService-Code-CI
+    demands: msbuild
+  workspace:
+    clean: all
+  steps:
+  - checkout: self
+
+  - template: template-steps-Compile.yaml
+    parameters:
+      Target: CoreService
+
+- job: codebuild_database
+  displayName: Compile Databases
+  pool:
+    name: CoreService-Code-CI
+    demands: msbuild
+  workspace:
+    clean: all
+  steps:
+  - checkout: self
+
+  - template: template-steps-Compile.yaml
+    parameters:
+      Target: Databases
+
+- job: codebuild_taskman
+  displayName: Compile TaskMan
+  pool:
+    name: CoreService-Code-CI
+    demands: msbuild
+  workspace:
+    clean: all
+  steps:
+  - checkout: self
+
+  - template: template-steps-Compile.yaml
+    parameters:
+      Target: TaskMan
+
+- job: testtransforms
+  displayName: Test Transforms
+  pool:
+    name: CoreService-Code-CI
+    demands: msbuild
+  workspace:
+    clean: all
+  steps:
+  - checkout: self
+
+  - task: MSBuild@1
+    displayName: Test Transforms
+    inputs:
+      solution: TestTransforms.proj
+      msbuildVersion: 15.0
+      platform: Any CPU
+      configuration: Release
+...

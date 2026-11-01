@@ -1,0 +1,85 @@
+# .pre-commit-config.yaml
+# .pre-commit-config configuration
+# Maintained by: Platform Engineering
+
+# .pre-commit-config.yaml — .pre-commit-config configuration
+
+---
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.2.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-added-large-files
+      - id: check-yaml
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.29.0
+    hooks:
+      - id: yamllint
+        verbose: true # create awareness of linter findings
+        args: ["-d", "{extends: relaxed, rules: {line-length: disable}}"]
+  - repo: local
+    hooks:
+      - id: check-running-self-hosted
+        name: Action must run only on self hosted runners
+        language: system
+        # files: "^.*.yaml$"
+        verbose: true
+        entry: |
+          bash -c '
+            files=$(find . -type f -name "*.yaml" -maxdepth 10 -not -path ".git")
+            errors=""
+            for file in $files; do
+              if grep -q "runs-on" $file; then
+                grep -qE ".*runs-on:.*(tag-).*" $file || errors="$errors\n$file"
+              fi
+            done
+            if [ -n "$errors" ]; then
+              echo "The following files are not using self-hosted runners:\n$errors"
+              exit 1
+            else
+              exit 0
+            fi
+          '
+  - repo: local
+    hooks:
+      - id: verify-go-work-file
+        name: Check if go.work is setup correctly
+        language: system
+        files: "^.*go$"
+        verbose: true
+        entry: |
+          bash -c '
+            find . -name 'go.mod' | sort | while read -r file; do
+              grep -q "$(dirname $file)" go.work || {
+                echo "$file is not present in go.work workspace"
+                exit 1
+              }
+            done
+
+            grep "use\s" go.work | cut -d" " -f2 | while read -r module; do
+              test -f "$module/go.mod" || {
+                echo "$module is not present in go.work workspace"
+                exit 1
+              }
+            done
+          '
+  - repo: local
+    hooks:
+      - id: check-if-actions-is-listed-on-readme
+        name: Actions should be listed on README.md
+        language: system
+        verbose: true
+        entry: |
+          bash -c '
+            find . -name 'README.md' | sort | while read -r file; do
+              [[ "$file" = "./README.md" ]] && continue
+              file="$(echo $file | rev | cut -d'/' -f2- | rev)"
+              file="${file/\.\//}"
+              grep -q "\[$file\](" README.md || {
+                echo "$file is not documented on README.md"
+                exit 1
+              }
+            done
+          '

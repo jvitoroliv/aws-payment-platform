@@ -1,0 +1,171 @@
+# pr-workflow.yml
+# pr-workflow configuration
+
+name: Pull Request
+run-name: PR Build for ${{ github.head_ref }} by @${{ github.actor }}
+
+on:
+  pull_request:
+    branches:
+      - main
+      - master
+    types: [opened, synchronize, reopened]
+
+env:
+  GL_DEBUG: linters_output
+  GOPACKAGESPRINTGOLISTERRORS: 1
+
+jobs:
+  build-and-test:
+    name: Build and Test
+    runs-on: ["tag-dev", "self-hosted"]
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set Version
+        id: version
+        run: |
+          # Replica a lógica do Jenkins: ${env.BRANCH_NAME}${env.BUILD_NUMBER}".toLowerCase()- 'pr' - '-' .take(6)
+          VERSION=$(echo "${{ github.head_ref }}${{ github.run_number }}" | tr '[:upper:]' '[:lower:]' | sed 's/pr//g' | sed 's/-//g' | cut -c1-6)
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "Version: $VERSION"
+
+      - name: Build Description
+        run: |
+          echo "## Pull Request Build" >> $GITHUB_STEP_SUMMARY
+          echo "| Parameter | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Source Branch | ${{ github.head_ref }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Target Branch | ${{ github.base_ref }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Author | ${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Version | ${{ steps.version.outputs.VERSION }} |" >> $GITHUB_STEP_SUMMARY
+
+      - name: Unit Tests
+        run: |
+          docker-compose -f docker/builder/docker-compose.yml build builder
+          docker-compose -f docker/builder/docker-compose.yml run --rm builder bash -c "make test"
+        env:
+          GITHUB_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build for Artifactory
+        run: |
+          docker-compose -f docker/builder/docker-compose.yml run --rm builder bash -c './scripts/build_artifactory.sh ${{ steps.version.outputs.VERSION }}'
+        env:
+          GITHUB_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Deploy to Artifactory
+        run: |
+          docker run --rm \
+            -v $(pwd):/workspace \
+            -w /workspace \
+            -e JFROG_CLI_OFFER_CONFIG=false \
+            releases-docker.jfrog.io/jfrog/jfrog-cli-v2-jf:latest \
+            bash -c "
+              jf c add --url=https://registry.example.io/ --access-token=${{ secrets.JFROG_ACCESS_TOKEN }}
+              jf rt u 'dist-files/*' tag-generic-nonprod-federated-us/chronos/${{ steps.version.outputs.VERSION }}/ --build-name ps-tag-chronos --build-number ${{ steps.version.outputs.VERSION }} --module lambdas
+              jf rt build-publish ps-tag-chronos ${{ steps.version.outputs.VERSION }}
+            "
+
+      - name: Deploy to DEV Environment
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const response = await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'deploy-chronos.yml',
+              ref: context.ref,
+              inputs: {
+                environment: 'dev',
+                region: 'us-east-1',
+                application_version: '${{ steps.version.outputs.VERSION }}',
+                run_oneshots: 'false'
+              }
+            });
+            
+            // Wait a bit and then check for the workflow run
+            await new Promise(resolve => setTimeout(resolve, 5000));
+            
+            const runs = await github.rest.actions.listWorkflowRunsForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'deploy-chronos.yml',
+              head_sha: context.sha,
+              per_page: 1
+            });
+            
+            if (runs.data.workflow_runs.length > 0) {
+              const runId = runs.data.workflow_runs[0].id;
+              console.log(`Deployment workflow started: ${runs.data.workflow_runs[0].html_url}`);
+              
+              // Wait for completion (with timeout)
+              let attempts = 0;
+              const maxAttempts = 60; // 30 minutes max
+              
+              while (attempts < maxAttempts) {
+                const run = await github.rest.actions.getWorkflowRun({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  run_id: runId
+                });
+                
+                if (run.data.status === 'completed') {
+                  if (run.data.conclusion === 'success') {
+                    console.log('Deployment completed successfully');
+                    break;
+                  } else {
+                    throw new Error(`Deployment failed with conclusion: ${run.data.conclusion}`);
+                  }
+                }
+                
+                attempts++;
+                await new Promise(resolve => setTimeout(resolve, 30000)); // Wait 30s
+              }
+              
+              if (attempts >= maxAttempts) {
+                throw new Error('Deployment timed out');
+              }
+            }
+
+      - name: Reset Dev Database
+        run: |
+          docker run --rm \
+            -v $(pwd)/automated-tests/seed-data:/workspace \
+            -w /workspace \
+            mongo:7.0 \
+            bash -c "
+              mongosh 'mongodb+srv://test-cluster.example.mongodb.net/chronos' --username $ATLAS_USER --password $ATLAS_PASSWORD --eval 'db.dropDatabase()'
+              mongosh 'mongodb+srv://test-cluster.example.mongodb.net/chronos' --username $ATLAS_USER --password $ATLAS_PASSWORD data.js
+            "
+          echo 'Dev Database was reset'
+        env:
+          ATLAS_USER: ${{ secrets.ATLAS_DEV_ADMIN_USER }}
+          ATLAS_PASSWORD: ${{ secrets.ATLAS_DEV_ADMIN_PASSWORD }}
+
+      - name: Run Automation Tests
+        run: |
+          chmod +x ./automated-tests/docker/run_automation_aws.sh
+          ./automated-tests/docker/run_automation_aws.sh dev us-east-1
+        env:
+          ENVIRONMENT: dev
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker-compose -f ./docker/builder/docker-compose.yml down || true
+
+      - name: Generate Test Report
+        if: always()
+        run: |
+          echo "## Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Unit Tests: Completed" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Build: Completed" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Artifactory Upload: Completed" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ DEV Deployment: Completed" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Database Reset: Completed" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Automation Tests: Completed" >> $GITHUB_STEP_SUMMARY

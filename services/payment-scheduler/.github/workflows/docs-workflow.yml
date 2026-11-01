@@ -1,0 +1,20 @@
+# docs-workflow.yml — docs-workflow configuration
+
+name: Build pay-online docs
+
+# This workflow is triggered on pushes to the repository on master with changes in the api/ directory.
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - 'api/**'
+jobs:
+  mkdocs:
+    name: Build and deploy mkdocs site
+    runs-on: [self-hosted, linux, x64, runner-v3]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Build
+        uses: docker://kencochrane/finservdocs-builder:v0.7

@@ -1,0 +1,4 @@
+    encrypt        = true
+    bucket         = "corp-prod-terraform-state-store-us-east-1"
+    key            = "atc-prod.tfstate"
+    region         = "us-east-1"

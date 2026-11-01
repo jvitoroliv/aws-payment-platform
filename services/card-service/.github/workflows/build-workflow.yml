@@ -1,0 +1,25 @@
+# build-workflow.yml — build pipeline
+
+# build-workflow.yml — build pipeline
+
+---
+name: Manual Build & Test
+run-name: Manual Build and Test by @${{ github.actor }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      trigger_image_push:
+        description: Triggers whether the image should be pushed to the nonprod Artifactory repo.
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  ci:
+    name: CI
+    uses: example-org/shared-actions/.github/workflows/build-service.yaml@build-service-v1
+    with:
+      deepsource_dsn_vault_path: 'ci/kvv2/code-quality-dsn microservice-card-service'
+      trigger_image_push: ${{ inputs.trigger_image_push }}
+    secrets: inherit
